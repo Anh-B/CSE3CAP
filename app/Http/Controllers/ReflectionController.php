@@ -9,7 +9,7 @@ class ReflectionController extends Controller
 {
     public function store(Request $request)
     {
-        // 1. Kiểm tra dữ liệu (score bắt buộc từ 1 đến 5)
+        // 1. Validate input (score is required, from 1 to 5)
         $validated = $request->validate([
             'score'   => 'required|integer|min:1|max:5',
             'comment' => 'nullable|string|max:1000',
@@ -21,14 +21,14 @@ class ReflectionController extends Controller
             'comment.max'    => 'The comment may not be greater than 1000 characters.',
         ]);
 
-        // 2. Lưu vào CSDL
+        // 2. Save to the database
         $reflection = Reflection::create([
             'user_id' => auth()->id() ?? null,
             'score'   => $validated['score'],
             'comment' => $validated['comment'] ?? null,
         ]);
 
-        // 3. Trả về thông báo thành công
+        // 3. Return success response
         return response()->json([
             'success' => true,
             'message' => 'Reflection score submitted successfully!',
@@ -36,13 +36,25 @@ class ReflectionController extends Controller
         ], 201);
     }
 
-    public function index()
+    public function index(Request $request)
     {
-        $reflections = Reflection::latest()->get();
+        // Paginate instead of loading the entire table at once,
+        // keeping the response fast and stable as the number of
+        // reflections grows. Clients can pass ?per_page=20&page=2.
+        $perPage = (int) $request->query('per_page', 15);
+        $perPage = min(max($perPage, 1), 100); // clamp to 1-100
+
+        $reflections = Reflection::latest()->paginate($perPage);
 
         return response()->json([
             'success' => true,
-            'data'    => $reflections,
+            'data'    => $reflections->items(),
+            'meta'    => [
+                'current_page' => $reflections->currentPage(),
+                'per_page'     => $reflections->perPage(),
+                'total'        => $reflections->total(),
+                'last_page'    => $reflections->lastPage(),
+            ],
         ]);
     }
 }
