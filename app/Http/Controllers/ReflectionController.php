@@ -36,15 +36,27 @@ class ReflectionController extends Controller
         ], 201);
     }
 
-    public function index()
-    {
-        $reflections = Reflection::latest()->get();
+    public function index(Request $request)
+{
+    // Paginate instead of loading the entire table at once,
+    // keeping the response fast and stable as the number of
+    // reflections grows. Clients can pass ?per_page=20&page=2.
+    $perPage = (int) $request->query('per_page', 15);
+    $perPage = min(max($perPage, 1), 100); // clamp to 1-100
 
-        return response()->json([
-            'success' => true,
-            'data'    => $reflections,
-        ]);
-    }
+    $reflections = Reflection::latest()->paginate($perPage);
+
+    return response()->json([
+        'success' => true,
+        'data'    => $reflections->items(),
+        'meta'    => [
+            'current_page' => $reflections->currentPage(),
+            'per_page'     => $reflections->perPage(),
+            'total'        => $reflections->total(),
+            'last_page'    => $reflections->lastPage(),
+        ],
+    ]);
+}
 
     /**
      * Update the specified reflection entry.
