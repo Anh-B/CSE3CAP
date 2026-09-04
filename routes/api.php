@@ -15,3 +15,5 @@ Route::get('/reflections', [ReflectionController::class, 'index']);
 use App\Http\Controllers\AssessmentController;
 
 Route::post('/assessments', [AssessmentController::class, 'store']);
+
+Route::put('/reflections/{id}', [ReflectionController::class, 'update']);

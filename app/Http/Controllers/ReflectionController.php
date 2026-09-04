@@ -9,7 +9,7 @@ class ReflectionController extends Controller
 {
     public function store(Request $request)
     {
-        // 1. Kiểm tra dữ liệu (score bắt buộc từ 1 đến 5)
+        // 1. Validate request data
         $validated = $request->validate([
             'score'   => 'required|integer|min:1|max:5',
             'comment' => 'nullable|string|max:1000',
@@ -21,14 +21,14 @@ class ReflectionController extends Controller
             'comment.max'    => 'The comment may not be greater than 1000 characters.',
         ]);
 
-        // 2. Lưu vào CSDL
+        // 2. Save the reflection entry to the database
         $reflection = Reflection::create([
             'user_id' => auth()->id() ?? null,
             'score'   => $validated['score'],
             'comment' => $validated['comment'] ?? null,
         ]);
 
-        // 3. Trả về thông báo thành công
+        // 3. Return success response
         return response()->json([
             'success' => true,
             'message' => 'Reflection score submitted successfully!',
@@ -44,5 +44,69 @@ class ReflectionController extends Controller
             'success' => true,
             'data'    => $reflections,
         ]);
+    }
+
+    /**
+     * Update the specified reflection entry.
+     */
+    public function update(Request $request, $id)
+    {
+        // 1. Find the reflection entry by ID
+        $reflection = Reflection::find($id);
+
+        // 2. Check if the entry exists (Edge case handling)
+        if (!$reflection) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Reflection entry not found.'
+            ], 404);
+        }
+
+        // 3. Validate input data
+        $validated = $request->validate([
+            'score'   => 'sometimes|required|integer|min:1|max:5',
+            'comment' => 'nullable|string|max:1000',
+        ], [
+            'score.integer' => 'The score must be an integer.',
+            'score.min'     => 'The self-review score must be at least 1.',
+            'score.max'     => 'The self-review score may not be greater than 5.',
+            'comment.max'   => 'The comment may not exceed 1000 characters.'
+        ]);
+
+        // 4. Update the database record
+        $reflection->update($validated);
+
+        // 5. Return success response
+        return response()->json([
+            'success' => true,
+            'message' => 'Reflection updated successfully!',
+            'data'    => $reflection
+        ], 200);
+    }
+
+    /**
+     * Remove the specified reflection entry from storage.
+     */
+    public function destroy($id)
+    {
+        // 1. Find the reflection entry by ID
+        $reflection = Reflection::find($id);
+
+        // 2. Check if the entry exists (Edge case handling)
+        if (!$reflection) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Reflection entry not found.'
+            ], 404);
+        }
+
+        // 3. Delete the record
+        $reflection->delete();
+
+        // 4. Return success response
+        return response()->json([
+            'success' => true,
+            'message' => 'Reflection deleted successfully!'
+        ], 200);
     }
 }
