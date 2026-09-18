@@ -17,3 +17,4 @@ use App\Http\Controllers\AssessmentController;
 Route::post('/assessments', [AssessmentController::class, 'store']);
 
 Route::put('/reflections/{id}', [ReflectionController::class, 'update']);
+Route::delete('/reflections/{id}', [ReflectionController::class, 'destroy']);

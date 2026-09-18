@@ -8,5 +8,9 @@ use Illuminate\Database\Eloquent\Model;
 class Reflection extends Model
 {
     use HasFactory;
-    protected $fillable = ['user_id', 'score', 'comment'];
+    protected $fillable = ['user_id', 'score', 'comment', 'scores'];
+
+    protected $casts = [
+        'scores' => 'array',
+    ];
 }
