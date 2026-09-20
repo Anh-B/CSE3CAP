@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\JournalExportController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -18,3 +19,8 @@ Route::post('/assessments', [AssessmentController::class, 'store']);
 
 Route::put('/reflections/{id}', [ReflectionController::class, 'update']);
 Route::delete('/reflections/{id}', [ReflectionController::class, 'destroy']);
+
+Route::get('/journal/export', [
+    JournalExportController::class,
+    'export'
+]);
