@@ -70,6 +70,31 @@ class ReflectionController extends Controller
 }
 
     /**
+     * Show a single reflection entry, with any assessor feedback on it.
+     * Gives the radar chart both sets of scores in one call:
+     * data.scores (self) and data.assessments[].scores (assessor).
+     */
+    public function show($id)
+    {
+        // 1. Find the reflection entry by ID, with its assessments
+        $reflection = Reflection::with('assessments')->find($id);
+
+        // 2. Check if the entry exists (Edge case handling)
+        if (!$reflection) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Reflection entry not found.'
+            ], 404);
+        }
+
+        // 3. Return the entry
+        return response()->json([
+            'success' => true,
+            'data'    => $reflection
+        ], 200);
+    }
+
+    /**
      * Update the specified reflection entry.
      */
     public function update(Request $request, $id)
