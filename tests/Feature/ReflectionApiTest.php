@@ -31,6 +31,82 @@ class ReflectionApiTest extends TestCase
         $this->assertDatabaseHas('reflections', ['score' => 4]);
     }
 
+    // ---------- Per-competency scores (radar chart) ----------
+
+    private function validCompetencyScores(): array
+    {
+        return [
+            'contribution'  => 4,
+            'communication' => 3,
+            'collaboration' => 4,
+            'agile'         => 5,
+            'continuous'    => 3,
+            'leadership'    => 4,
+        ];
+    }
+
+    public function test_can_submit_a_reflection_with_competency_scores(): void
+    {
+        $response = $this->postJson('/api/reflections', [
+            'score'   => 4,
+            'comment' => 'Sprint 4 self review.',
+            'scores'  => $this->validCompetencyScores(),
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJson(['success' => true]);
+
+        $reflection = Reflection::latest()->first();
+        $this->assertEquals($this->validCompetencyScores(), $reflection->scores);
+    }
+
+    public function test_competency_scores_are_optional(): void
+    {
+        $response = $this->postJson('/api/reflections', ['score' => 3]);
+
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('reflections', ['score' => 3]);
+        $this->assertNull(Reflection::latest()->first()->scores);
+    }
+
+    public function test_rejects_competency_scores_missing_a_competency(): void
+    {
+        $scores = $this->validCompetencyScores();
+        unset($scores['leadership']);
+
+        $response = $this->postJson('/api/reflections', [
+            'score'  => 4,
+            'scores' => $scores,
+        ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors(['scores.leadership']);
+    }
+
+    public function test_rejects_competency_score_out_of_range(): void
+    {
+        $scores = $this->validCompetencyScores();
+        $scores['agile'] = 9;
+
+        $response = $this->postJson('/api/reflections', [
+            'score'  => 4,
+            'scores' => $scores,
+        ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors(['scores.agile']);
+    }
+
+    public function test_can_update_competency_scores(): void
+    {
+        $reflection = Reflection::factory()->create();
+
+        $response = $this->putJson("/api/reflections/{$reflection->id}", [
+            'scores' => $this->validCompetencyScores(),
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertEquals($this->validCompetencyScores(), $reflection->fresh()->scores);
+    }
+
     public function test_comment_is_optional(): void
     {
         $response = $this->postJson('/api/reflections', ['score' => 3]);
@@ -89,6 +165,97 @@ class ReflectionApiTest extends TestCase
         ]);
 
         $response->assertStatus(422)->assertJsonValidationErrors(['comment']);
+    }
+
+    // ---------- update() ----------
+
+    public function test_can_update_an_existing_reflection(): void
+    {
+        $reflection = Reflection::factory()->create(['score' => 2, 'comment' => 'Original comment.']);
+
+        $response = $this->putJson("/api/reflections/{$reflection->id}", [
+            'score'   => 5,
+            'comment' => 'Updated comment.',
+        ]);
+
+        $response->assertStatus(200)
+            ->assertJson(['success' => true])
+            ->assertJsonStructure(['success', 'message', 'data' => ['id', 'score', 'comment']]);
+
+        $this->assertDatabaseHas('reflections', [
+            'id'      => $reflection->id,
+            'score'   => 5,
+            'comment' => 'Updated comment.',
+        ]);
+    }
+
+    public function test_can_update_only_the_score(): void
+    {
+        $reflection = Reflection::factory()->create(['score' => 1, 'comment' => 'Keep me.']);
+
+        $response = $this->putJson("/api/reflections/{$reflection->id}", ['score' => 4]);
+
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('reflections', [
+            'id'      => $reflection->id,
+            'score'   => 4,
+            'comment' => 'Keep me.',
+        ]);
+    }
+
+    public function test_update_returns_404_for_a_nonexistent_reflection(): void
+    {
+        $response = $this->putJson('/api/reflections/99999', ['score' => 3]);
+
+        $response->assertStatus(404)->assertJson(['success' => false]);
+    }
+
+    public function test_update_rejects_score_out_of_range(): void
+    {
+        $reflection = Reflection::factory()->create();
+
+        $response = $this->putJson("/api/reflections/{$reflection->id}", ['score' => 6]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors(['score']);
+    }
+
+    public function test_update_rejects_non_integer_score(): void
+    {
+        $reflection = Reflection::factory()->create();
+
+        $response = $this->putJson("/api/reflections/{$reflection->id}", ['score' => 'great']);
+
+        $response->assertStatus(422)->assertJsonValidationErrors(['score']);
+    }
+
+    public function test_update_rejects_comment_longer_than_1000_characters(): void
+    {
+        $reflection = Reflection::factory()->create();
+
+        $response = $this->putJson("/api/reflections/{$reflection->id}", [
+            'comment' => str_repeat('c', 1001),
+        ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors(['comment']);
+    }
+
+    // ---------- destroy() ----------
+
+    public function test_can_delete_an_existing_reflection(): void
+    {
+        $reflection = Reflection::factory()->create();
+
+        $response = $this->deleteJson("/api/reflections/{$reflection->id}");
+
+        $response->assertStatus(200)->assertJson(['success' => true]);
+        $this->assertDatabaseMissing('reflections', ['id' => $reflection->id]);
+    }
+
+    public function test_delete_returns_404_for_a_nonexistent_reflection(): void
+    {
+        $response = $this->deleteJson('/api/reflections/99999');
+
+        $response->assertStatus(404)->assertJson(['success' => false]);
     }
 
     // ---------- Response performance ----------

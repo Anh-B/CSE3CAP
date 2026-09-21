@@ -11,8 +11,18 @@ class ReflectionController extends Controller
     {
         // 1. Validate request data
         $validated = $request->validate([
-            'score'   => 'required|integer|min:1|max:5',
-            'comment' => 'nullable|string|max:1000',
+            'score'                 => 'required|integer|min:1|max:5',
+            'comment'               => 'nullable|string|max:1000',
+            // Optional per-competency scores that feed the radar chart.
+            // Kept separate from the overall `score` above so existing
+            // clients that only send `score` keep working unchanged.
+            'scores'                    => 'nullable|array',
+            'scores.contribution'      => 'required_with:scores|integer|min:1|max:5',
+            'scores.communication'     => 'required_with:scores|integer|min:1|max:5',
+            'scores.collaboration'     => 'required_with:scores|integer|min:1|max:5',
+            'scores.agile'             => 'required_with:scores|integer|min:1|max:5',
+            'scores.continuous'        => 'required_with:scores|integer|min:1|max:5',
+            'scores.leadership'        => 'required_with:scores|integer|min:1|max:5',
         ], [
             'score.required' => 'Please select a self-review score.',
             'score.integer'  => 'The score must be an integer.',
@@ -26,6 +36,7 @@ class ReflectionController extends Controller
             'user_id' => auth()->id() ?? null,
             'score'   => $validated['score'],
             'comment' => $validated['comment'] ?? null,
+            'scores'  => $validated['scores'] ?? null,
         ]);
 
         // 3. Return success response
@@ -76,8 +87,15 @@ class ReflectionController extends Controller
 
         // 3. Validate input data
         $validated = $request->validate([
-            'score'   => 'sometimes|required|integer|min:1|max:5',
-            'comment' => 'nullable|string|max:1000',
+            'score'                 => 'sometimes|required|integer|min:1|max:5',
+            'comment'               => 'nullable|string|max:1000',
+            'scores'                    => 'nullable|array',
+            'scores.contribution'      => 'required_with:scores|integer|min:1|max:5',
+            'scores.communication'     => 'required_with:scores|integer|min:1|max:5',
+            'scores.collaboration'     => 'required_with:scores|integer|min:1|max:5',
+            'scores.agile'             => 'required_with:scores|integer|min:1|max:5',
+            'scores.continuous'        => 'required_with:scores|integer|min:1|max:5',
+            'scores.leadership'        => 'required_with:scores|integer|min:1|max:5',
         ], [
             'score.integer' => 'The score must be an integer.',
             'score.min'     => 'The self-review score must be at least 1.',
