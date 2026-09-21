@@ -22,6 +22,7 @@ class DemoSeederTest extends TestCase
 
         $this->assertSame(6, Reflection::count());
         $this->assertSame(4, Assessment::count());
+        $this->assertSame(4, \App\Models\Evidence::count());
 
         $keys = ['contribution', 'communication', 'collaboration', 'agile', 'continuous', 'leadership'];
 
