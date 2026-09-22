@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\Assessment;
+use App\Models\Evidence;
 use App\Models\Reflection;
 use App\Models\User;
 use Illuminate\Database\Seeder;
@@ -13,7 +14,8 @@ use Illuminate\Database\Seeder;
  * Creates 3 students + 1 assessor, 6 reflections (with the 6 competency
  * scores for the radar chart), and assessor feedback on 4 of them.
  * The other 2 have no assessment yet, so the demo can also show what
- * an entry waiting for review looks like.
+ * an entry waiting for review looks like. Some reflections also have
+ * evidence links attached (links only, so no files need to exist).
  *
  * Run with:  php artisan db:seed --class=DemoSeeder
  * All demo accounts use the password: password
@@ -74,7 +76,14 @@ class DemoSeeder extends Seeder
             ],
         ];
 
-        foreach ($entries as [$studentKey, $score, $comment, $selfScores, $assessment]) {
+        // Evidence links for some entries, by position in $entries (0-based)
+        $evidenceLinks = [
+            0 => [['https://github.com/Anh-B/CSE3CAP', 'Project repo']],
+            1 => [['https://github.com/Anh-B/CSE3CAP/pulls', 'Scoring + validation PR']],
+            2 => [['https://github.com/Anh-B/CSE3CAP/pulls', 'Radar chart PR'], ['https://www.sfia-online.org/en/sfia-9', 'SFIA 9 framework']],
+        ];
+
+        foreach ($entries as $i => [$studentKey, $score, $comment, $selfScores, $assessment]) {
             $reflection = Reflection::create([
                 'user_id' => $students[$studentKey]->id,
                 'score'   => $score,
@@ -91,6 +100,15 @@ class DemoSeeder extends Seeder
                     'score'         => $assessorScore,
                     'feedback'      => $feedback,
                     'scores'        => $assessorScores,
+                ]);
+            }
+
+            foreach ($evidenceLinks[$i] ?? [] as [$link, $description]) {
+                Evidence::create([
+                    'reflection_id' => $reflection->id,
+                    'type'          => 'link',
+                    'link'          => $link,
+                    'description'   => $description,
                 ]);
             }
         }

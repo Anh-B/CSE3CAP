@@ -23,3 +23,11 @@ Route::delete('/reflections/{id}', [ReflectionController::class, 'destroy']);
 Route::get('/reflections/{id}', [ReflectionController::class, 'show']);
 Route::get('/assessments', [AssessmentController::class, 'index']);
 Route::get('/assessments/{id}', [AssessmentController::class, 'show']);
+
+// Sprint 4 - evidence (files or links) attached to a reflection
+use App\Http\Controllers\EvidenceController;
+
+Route::post('/reflections/{id}/evidence', [EvidenceController::class, 'store']);
+Route::get('/reflections/{id}/evidence', [EvidenceController::class, 'index']);
+Route::get('/evidence/{id}/download', [EvidenceController::class, 'download']);
+Route::delete('/evidence/{id}', [EvidenceController::class, 'destroy']);
