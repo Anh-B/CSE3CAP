@@ -167,6 +167,54 @@ class ReflectionApiTest extends TestCase
         $response->assertStatus(422)->assertJsonValidationErrors(['comment']);
     }
 
+    // ---------- show() ----------
+
+    public function test_can_show_a_single_reflection_with_its_assessments(): void
+    {
+        $reflection = Reflection::factory()->create([
+            'score'  => 4,
+            'scores' => $this->validCompetencyScores(),
+        ]);
+
+        \App\Models\Assessment::factory()->create([
+            'reflection_id' => $reflection->id,
+            'score'         => 3,
+            'scores'        => [
+                'contribution'  => 3,
+                'communication' => 4,
+                'collaboration' => 3,
+                'agile'         => 4,
+                'continuous'    => 3,
+                'leadership'    => 3,
+            ],
+        ]);
+
+        $response = $this->getJson("/api/reflections/{$reflection->id}");
+
+        $response->assertStatus(200)
+            ->assertJson(['success' => true])
+            ->assertJsonPath('data.id', $reflection->id)
+            ->assertJsonPath('data.scores.agile', 5)
+            ->assertJsonPath('data.assessments.0.scores.communication', 4)
+            ->assertJsonCount(1, 'data.assessments');
+    }
+
+    public function test_show_returns_empty_assessments_when_none_exist(): void
+    {
+        $reflection = Reflection::factory()->create();
+
+        $response = $this->getJson("/api/reflections/{$reflection->id}");
+
+        $response->assertStatus(200)->assertJsonCount(0, 'data.assessments');
+    }
+
+    public function test_show_returns_404_for_a_nonexistent_reflection(): void
+    {
+        $response = $this->getJson('/api/reflections/99999');
+
+        $response->assertStatus(404)->assertJson(['success' => false]);
+    }
+
     // ---------- update() ----------
 
     public function test_can_update_an_existing_reflection(): void

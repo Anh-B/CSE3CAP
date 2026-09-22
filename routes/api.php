@@ -18,3 +18,8 @@ Route::post('/assessments', [AssessmentController::class, 'store']);
 
 Route::put('/reflections/{id}', [ReflectionController::class, 'update']);
 Route::delete('/reflections/{id}', [ReflectionController::class, 'destroy']);
+
+// Sprint 3 - read endpoints so the radar chart can load real self + assessor scores
+Route::get('/reflections/{id}', [ReflectionController::class, 'show']);
+Route::get('/assessments', [AssessmentController::class, 'index']);
+Route::get('/assessments/{id}', [AssessmentController::class, 'show']);

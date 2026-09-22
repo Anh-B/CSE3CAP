@@ -13,4 +13,10 @@ class Reflection extends Model
     protected $casts = [
         'scores' => 'array',
     ];
+
+    // Assessor feedback left on this reflection (assessments.reflection_id)
+    public function assessments()
+    {
+        return $this->hasMany(Assessment::class);
+    }
 }
