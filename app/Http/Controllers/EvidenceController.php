@@ -32,7 +32,15 @@ class EvidenceController extends Controller
             ], 404);
         }
 
-        // 3. Validate - exactly one of file or link
+        // 3. Only the student who owns this reflection can attach evidence to it
+        if ((int) $reflection->user_id !== (int) auth()->id()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You can only add evidence to your own reflections.'
+            ], 403);
+        }
+
+        // 4. Validate - exactly one of file or link
         $validated = $request->validate([
             // mimes checks what's actually inside the file, extensions checks
             // its name - both have to be on the allowed list
@@ -135,6 +143,15 @@ class EvidenceController extends Controller
                 'success' => false,
                 'message' => 'Evidence not found.'
             ], 404);
+        }
+
+        // Only the student who owns the reflection this evidence
+        // belongs to can remove it.
+        if ((int) $evidence->reflection->user_id !== (int) auth()->id()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You can only delete evidence on your own reflections.'
+            ], 403);
         }
 
         $evidence->delete(); // the model also deletes the stored file

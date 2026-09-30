@@ -4,9 +4,11 @@ namespace Tests\Feature;
 
 use App\Models\Evidence;
 use App\Models\Reflection;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 /**
@@ -18,17 +20,25 @@ class EvidenceApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected User $user;
+
     protected function setUp(): void
     {
         parent::setUp();
         Storage::fake(); // don't write real files during tests
+        // Sprint 5 - every route now needs a logged-in user, and adding
+        // evidence now checks that the reflection belongs to whoever's
+        // logged in. Every Reflection::factory() call below is now owned
+        // by $this->user so those calls keep working.
+        $this->user = User::factory()->create();
+        Sanctum::actingAs($this->user);
     }
 
     // ---------- Happy path ----------
 
     public function test_can_upload_a_file_as_evidence(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
         $file = UploadedFile::fake()->create('sprint3-report.pdf', 500, 'application/pdf');
 
         $response = $this->postJson("/api/reflections/{$reflection->id}/evidence", [
@@ -50,7 +60,7 @@ class EvidenceApiTest extends TestCase
 
     public function test_can_add_a_link_as_evidence(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
 
         $response = $this->postJson("/api/reflections/{$reflection->id}/evidence", [
             'link'        => 'https://github.com/Anh-B/CSE3CAP/pull/4',
@@ -65,7 +75,7 @@ class EvidenceApiTest extends TestCase
 
     public function test_description_is_optional(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
 
         $response = $this->postJson("/api/reflections/{$reflection->id}/evidence", [
             'link' => 'https://example.com/doc',
@@ -76,8 +86,8 @@ class EvidenceApiTest extends TestCase
 
     public function test_can_list_evidence_for_a_reflection(): void
     {
-        $reflection = Reflection::factory()->create();
-        $other      = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
+        $other      = Reflection::factory()->create(['user_id' => $this->user->id]);
 
         $this->postJson("/api/reflections/{$reflection->id}/evidence", ['link' => 'https://example.com/a']);
         $this->postJson("/api/reflections/{$reflection->id}/evidence", ['file' => UploadedFile::fake()->create('screenshot.png', 200, 'image/png')]);
@@ -92,7 +102,7 @@ class EvidenceApiTest extends TestCase
 
     public function test_single_reflection_includes_its_evidence(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
         $this->postJson("/api/reflections/{$reflection->id}/evidence", ['link' => 'https://example.com/a']);
 
         $response = $this->getJson("/api/reflections/{$reflection->id}");
@@ -104,7 +114,7 @@ class EvidenceApiTest extends TestCase
 
     public function test_can_download_an_uploaded_file_with_its_original_name(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
         $this->postJson("/api/reflections/{$reflection->id}/evidence", [
             'file' => UploadedFile::fake()->createWithContent('notes.txt', 'my sprint notes'),
         ]);
@@ -118,7 +128,7 @@ class EvidenceApiTest extends TestCase
 
     public function test_can_delete_evidence_and_its_file(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
         $this->postJson("/api/reflections/{$reflection->id}/evidence", [
             'file' => UploadedFile::fake()->create('draft.docx', 100),
         ]);
@@ -134,7 +144,7 @@ class EvidenceApiTest extends TestCase
 
     public function test_deleting_a_reflection_also_deletes_its_evidence_files(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
         $this->postJson("/api/reflections/{$reflection->id}/evidence", [
             'file' => UploadedFile::fake()->create('report.pdf', 100, 'application/pdf'),
         ]);
@@ -150,7 +160,7 @@ class EvidenceApiTest extends TestCase
 
     public function test_rejects_when_neither_file_nor_link_is_sent(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
 
         $response = $this->postJson("/api/reflections/{$reflection->id}/evidence", ['description' => 'Nothing attached']);
 
@@ -159,7 +169,7 @@ class EvidenceApiTest extends TestCase
 
     public function test_rejects_when_both_file_and_link_are_sent(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
 
         $response = $this->postJson("/api/reflections/{$reflection->id}/evidence", [
             'file' => UploadedFile::fake()->create('report.pdf', 100, 'application/pdf'),
@@ -172,7 +182,7 @@ class EvidenceApiTest extends TestCase
 
     public function test_rejects_a_file_type_that_is_not_allowed(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
 
         $response = $this->postJson("/api/reflections/{$reflection->id}/evidence", [
             'file' => UploadedFile::fake()->create('setup.exe', 100, 'application/x-msdownload'),
@@ -183,7 +193,7 @@ class EvidenceApiTest extends TestCase
 
     public function test_rejects_a_renamed_file_even_if_the_content_looks_safe(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
 
         // Plain text inside, but named .exe - should still be rejected
         $response = $this->postJson("/api/reflections/{$reflection->id}/evidence", [
@@ -196,7 +206,7 @@ class EvidenceApiTest extends TestCase
 
     public function test_rejects_a_file_over_10mb(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
 
         $response = $this->postJson("/api/reflections/{$reflection->id}/evidence", [
             'file' => UploadedFile::fake()->create('huge.pdf', 10241, 'application/pdf'),
@@ -207,7 +217,7 @@ class EvidenceApiTest extends TestCase
 
     public function test_rejects_a_link_that_is_not_http_or_https(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
 
         foreach (['not a link', 'javascript:alert(1)', 'ftp://example.com/file'] as $bad) {
             $this->postJson("/api/reflections/{$reflection->id}/evidence", ['link' => $bad])
@@ -218,7 +228,7 @@ class EvidenceApiTest extends TestCase
 
     public function test_rejects_description_longer_than_255_characters(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
 
         $response = $this->postJson("/api/reflections/{$reflection->id}/evidence", [
             'link'        => 'https://example.com/doc',
@@ -242,7 +252,7 @@ class EvidenceApiTest extends TestCase
 
     public function test_download_returns_404_for_a_link_or_missing_evidence(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
         $this->postJson("/api/reflections/{$reflection->id}/evidence", ['link' => 'https://example.com/doc']);
         $link = Evidence::first();
 
@@ -253,5 +263,40 @@ class EvidenceApiTest extends TestCase
     public function test_delete_returns_404_for_nonexistent_evidence(): void
     {
         $this->deleteJson('/api/evidence/99999')->assertStatus(404)->assertJson(['success' => false]);
+    }
+
+    // ---------- Sprint 5: authentication & ownership ----------
+
+    public function test_guest_cannot_add_evidence(): void
+    {
+        $this->app['auth']->forgetGuards();
+        $reflection = Reflection::factory()->create();
+
+        $response = $this->postJson("/api/reflections/{$reflection->id}/evidence", ['link' => 'https://example.com/a']);
+
+        $response->assertStatus(401);
+    }
+
+    public function test_cannot_add_evidence_to_another_students_reflection(): void
+    {
+        $someoneElse = User::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $someoneElse->id]);
+
+        $response = $this->postJson("/api/reflections/{$reflection->id}/evidence", ['link' => 'https://example.com/a']);
+
+        $response->assertStatus(403);
+        $this->assertDatabaseCount('evidence', 0);
+    }
+
+    public function test_cannot_delete_evidence_on_another_students_reflection(): void
+    {
+        $someoneElse = User::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $someoneElse->id]);
+        $evidence = Evidence::factory()->create(['reflection_id' => $reflection->id]);
+
+        $response = $this->deleteJson("/api/evidence/{$evidence->id}");
+
+        $response->assertStatus(403);
+        $this->assertDatabaseHas('evidence', ['id' => $evidence->id]);
     }
 }

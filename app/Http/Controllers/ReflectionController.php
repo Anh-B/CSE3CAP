@@ -32,8 +32,10 @@ class ReflectionController extends Controller
         ]);
 
         // 2. Save the reflection entry to the database
+        // auth()->id() is always set here - this route sits behind
+        // the auth:sanctum middleware group, so there's no anonymous case.
         $reflection = Reflection::create([
-            'user_id' => auth()->id() ?? null,
+            'user_id' => auth()->id(),
             'score'   => $validated['score'],
             'comment' => $validated['comment'] ?? null,
             'scores'  => $validated['scores'] ?? null,
@@ -49,6 +51,14 @@ class ReflectionController extends Controller
 
     public function index(Request $request)
 {
+    // Scope note: this intentionally returns every student's reflections
+    // to any logged-in user, not just their own. Assessors need to browse
+    // and pick a reflection to score, and there's no student/assessor role
+    // field on the users table yet to tell the two apart. Locking this to
+    // "your own reflections only" would break assessing. A proper roles
+    // system is its own ticket - for now, requiring login (this ticket's
+    // actual goal) is the fix; who can read what is a follow-up.
+    //
     // Paginate instead of loading the entire table at once,
     // keeping the response fast and stable as the number of
     // reflections grows. Clients can pass ?per_page=20&page=2.
@@ -111,7 +121,15 @@ class ReflectionController extends Controller
             ], 404);
         }
 
-        // 3. Validate input data
+        // 3. Only the student who owns this entry can edit it
+        if ((int) $reflection->user_id !== (int) auth()->id()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You can only edit your own reflections.'
+            ], 403);
+        }
+
+        // 4. Validate input data
         $validated = $request->validate([
             'score'                 => 'sometimes|required|integer|min:1|max:5',
             'comment'               => 'nullable|string|max:1000',
@@ -129,10 +147,10 @@ class ReflectionController extends Controller
             'comment.max'   => 'The comment may not exceed 1000 characters.'
         ]);
 
-        // 4. Update the database record
+        // 5. Update the database record
         $reflection->update($validated);
 
-        // 5. Return success response
+        // 6. Return success response
         return response()->json([
             'success' => true,
             'message' => 'Reflection updated successfully!',
@@ -156,10 +174,18 @@ class ReflectionController extends Controller
             ], 404);
         }
 
-        // 3. Delete the record
+        // 3. Only the student who owns this entry can delete it
+        if ((int) $reflection->user_id !== (int) auth()->id()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You can only delete your own reflections.'
+            ], 403);
+        }
+
+        // 4. Delete the record
         $reflection->delete();
 
-        // 4. Return success response
+        // 5. Return success response
         return response()->json([
             'success' => true,
             'message' => 'Reflection deleted successfully!'
