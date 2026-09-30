@@ -1,0 +1,1893 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alumable | Reflection Journal</title>
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React 18, ReactDOM, and Babel CDNs -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Chart.js CDN for Radar Chart -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            background-color: #161D27;
+        }
+
+        /* Styling rules for PDF Export / Print */
+        @media print {
+            .no-print {
+                display: none !important;
+            }
+            body {
+                background: #F8F4E9 !important;
+                color: #232323 !important;
+            }
+            .page-shell {
+                box-shadow: none !important;
+                border: none !important;
+                padding: 0 !important;
+            }
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useRef, useEffect } = React;
+
+        // ---- Inline Icon Components ----
+        const Download = ({ size = 24, style, className }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style} className={className}>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+        );
+
+        const Paperclip = ({ size = 24, style, className }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style} className={className}>
+                <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+            </svg>
+        );
+
+        const FileText = ({ size = 24, style, className }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style} className={className}>
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
+            </svg>
+        );
+
+        const X = ({ size = 24, style, className }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style} className={className}>
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+        );
+
+        const Lock = ({ size = 24, style, className }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style} className={className}>
+                <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+        );
+
+        const Unlock = ({ size = 24, style, className }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style} className={className}>
+                <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>
+            </svg>
+        );
+
+        const PenLine = ({ size = 24, style, className }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style} className={className}>
+                <path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+            </svg>
+        );
+
+        // ---- Design tokens ----
+        const tokens = {
+            canvas: "#1C2430",
+            canvasDeep: "#161D27",
+            parchment: "#F8F4E9",
+            parchmentWarm: "#FFFDF8",
+            ink: "#232323",
+            inkSoft: "#6B6656",
+            brass: "#B8863B",
+            brassDark: "#8F6A2C",
+            brassTint: "rgba(184,134,59,0.10)",
+            sage: "#7C9484",
+            sageDark: "#3F5A45",
+            sagePanel: "#ECEFE4",
+            dusk: "#5C7A93",
+            duskDark: "#3E566B",
+            wine: "#8C5B62",
+            wineDark: "#6C4147",
+            rule: "#C9C2AA",
+        };
+
+        const competencies = [
+            { key: "contribution", label: "Contribution" },
+            { key: "communication", label: "Communication" },
+            { key: "collaboration", label: "Collaboration" },
+            { key: "agile", label: "Agile Improvement" },
+            { key: "continuous", label: "Continuous Improvement" },
+            { key: "leadership", label: "Leadership & Initiative" },
+        ];
+
+        // Categories used by reflection entries (supports filtering and sorting)
+        const reflectionCategories = [
+            "Development",
+            "Testing",
+            "Documentation",
+            "Teamwork",
+            "Research",
+            "Other",
+        ];
+
+        const assessorDefaultScores = {
+            contribution: 4,
+            communication: 3,
+            collaboration: 4,
+            agile: 5,
+            continuous: 3,
+            leadership: 4,
+        };
+
+        // ---- API integration layer ----
+        //
+        // Sprint 5: backend is deployed to Railway, so this now points at the
+        // real, public API instead of a local-only address.
+        const API_BASE_URL = "https://cse3cap-production.up.railway.app/api";
+
+        // Average of the 6 competency scores, rounded to the nearest whole
+        // number 1-5, because the backend's `score` column still stores a
+        // single overall score alongside the per-competency `scores` JSON.
+        function averageScore(scores) {
+            const values = Object.values(scores || {});
+            if (values.length === 0) return 3;
+            const avg = values.reduce((sum, v) => sum + Number(v), 0) / values.length;
+            return Math.min(5, Math.max(1, Math.round(avg)));
+        }
+
+        // Sprint 5: the backend now protects /reflections and /assessments
+        // with Sanctum (auth:sanctum) — every request needs an
+        // "Authorization: Bearer <token>" header, obtained by logging in
+        // via POST /login. The token is kept in a module-level variable
+        // (not React state) so every api.* call can read the latest value,
+        // and mirrored into localStorage so a page refresh stays logged in.
+        let authToken = null;
+        try {
+            authToken = localStorage.getItem("alumableAuthToken") || null;
+        } catch (error) {}
+
+        function setStoredAuthToken(token) {
+            authToken = token;
+            try {
+                if (token) localStorage.setItem("alumableAuthToken", token);
+                else localStorage.removeItem("alumableAuthToken");
+            } catch (error) {}
+        }
+
+        function authHeaders() {
+            const headers = { "Content-Type": "application/json" };
+            if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+            return headers;
+        }
+
+        // Reads the JSON body even on a failed response, so a 401/422 can
+        // surface the backend's actual "message" instead of just a status
+        // code.
+        async function parseJsonResponse(res, fallbackLabel) {
+            const body = await res.json().catch(() => null);
+            if (!res.ok) {
+                throw new Error(body?.message || `${fallbackLabel} failed: ${res.status}`);
+            }
+            return body;
+        }
+
+        const api = {
+            // Matches AuthController@register: POST /api/register.
+            // `role` is "student" or "assessor" (backend defaults to
+            // "student" if omitted).
+            async register(name, email, password, role) {
+                const res = await fetch(`${API_BASE_URL}/register`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        name,
+                        email,
+                        password,
+                        password_confirmation: password,
+                        role,
+                    }),
+                });
+                return parseJsonResponse(res, "register");
+            },
+            // Matches AuthController@login: POST /api/login.
+            async login(email, password) {
+                const res = await fetch(`${API_BASE_URL}/login`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ email, password }),
+                });
+                return parseJsonResponse(res, "login");
+            },
+            // Fetches one reflection entry together with any assessor
+            // feedback on it, so the radar chart can be rebuilt straight
+            // from the server on load. Matches ReflectionController@show:
+            // GET /api/reflections/{id}.
+            async getReflection(reflectionId) {
+                const res = await fetch(`${API_BASE_URL}/reflections/${reflectionId}`, {
+                    headers: authHeaders(),
+                });
+                return parseJsonResponse(res, "getReflection");
+            },
+            // Creates (or updates, if reflectionId is given) a reflection
+            // entry. Matches ReflectionController@store / @update:
+            // POST /api/reflections and PUT /api/reflections/{id}.
+            async saveReflectionEntry(payload, reflectionId = null) {
+                const url = reflectionId
+                    ? `${API_BASE_URL}/reflections/${reflectionId}`
+                    : `${API_BASE_URL}/reflections`;
+                const res = await fetch(url, {
+                    method: reflectionId ? "PUT" : "POST",
+                    headers: authHeaders(),
+                    body: JSON.stringify({
+                        score: averageScore(payload.scores),
+                        comment: payload.reflection || null,
+                        scores: payload.scores || null,
+                    }),
+                });
+                return parseJsonResponse(res, "saveReflectionEntry");
+            },
+            // Saves the student's self-assessment competency scores by
+            // creating/updating a reflection entry that carries them.
+            // Matches ReflectionController@store / @update.
+            async saveSelfScores(scores, reflectionId = null) {
+                const url = reflectionId
+                    ? `${API_BASE_URL}/reflections/${reflectionId}`
+                    : `${API_BASE_URL}/reflections`;
+                const res = await fetch(url, {
+                    method: reflectionId ? "PUT" : "POST",
+                    headers: authHeaders(),
+                    body: JSON.stringify({
+                        score: averageScore(scores),
+                        scores,
+                    }),
+                });
+                return parseJsonResponse(res, "saveSelfScores");
+            },
+            // Saves the assessor's competency scores against a reflection.
+            // Matches AssessmentController@store: POST /api/assessments.
+            async saveAssessorScores(scores, reflectionId) {
+                if (!reflectionId) {
+                    throw new Error("saveAssessorScores requires a reflectionId — save a self-assessment first.");
+                }
+                const res = await fetch(`${API_BASE_URL}/assessments`, {
+                    method: "POST",
+                    headers: authHeaders(),
+                    body: JSON.stringify({
+                        reflection_id: reflectionId,
+                        score: averageScore(scores),
+                        scores,
+                    }),
+                });
+                return parseJsonResponse(res, "saveAssessorScores");
+            },
+        };
+
+        const tabs = [
+            { key: "entry", no: "01", label: "New Entry", accent: tokens.brass, accentDark: tokens.brassDark },
+            { key: "self", no: "02", label: "Self-Assessment", accent: tokens.dusk, accentDark: tokens.duskDark },
+            { key: "assessor", no: "03", label: "Assessor Feedback", accent: tokens.sage, accentDark: tokens.sageDark },
+            { key: "progress", no: "04", label: "Progress Overview", accent: tokens.wine, accentDark: tokens.wineDark },
+        ];
+
+        function SectionEyebrow({ no, label, accent, accentDark }) {
+            return (
+                <div className="flex items-center gap-3 mb-1">
+                    <span
+                        className="text-xs font-medium px-2 py-0.5 rounded"
+                        style={{ fontFamily: "'IBM Plex Mono', monospace", backgroundColor: `${accent}1A`, color: accentDark }}
+                    >
+                        TAB {no}
+                    </span>
+                    <h2 className="text-lg font-medium flex items-center gap-2" style={{ color: tokens.ink, fontFamily: "'Newsreader', serif" }}>
+                        <PenLine size={16} style={{ color: accentDark }} />
+                        {label}
+                    </h2>
+                </div>
+            );
+        }
+
+        function formatFileSize(bytes) {
+            if (!bytes) return "0 KB";
+            const kb = bytes / 1024;
+            if (kb < 1024) return `${kb.toFixed(1)} KB`;
+            return `${(kb / 1024).toFixed(1)} MB`;
+        }
+
+        // ---- Radar chart: self vs assessor across the 6 competencies ----
+        function RadarChart({ selfScores, assessorScores, competencies, tokens }) {
+            const canvasRef = useRef(null);
+            const chartRef = useRef(null);
+
+            useEffect(() => {
+                if (!canvasRef.current || typeof Chart === "undefined") return;
+
+                const selfData = competencies.map((c) => selfScores[c.key] || 0);
+                const assessorData = competencies.map((c) => assessorScores[c.key] || 0);
+
+                if (chartRef.current) {
+                    chartRef.current.data.datasets[0].data = selfData;
+                    chartRef.current.data.datasets[1].data = assessorData;
+                    chartRef.current.update();
+                    return;
+                }
+
+                chartRef.current = new Chart(canvasRef.current.getContext("2d"), {
+                    type: "radar",
+                    data: {
+                        labels: competencies.map((c) => c.label),
+                        datasets: [
+                            {
+                                label: "Self-Assessment",
+                                data: selfData,
+                                borderColor: tokens.dusk,
+                                backgroundColor: `${tokens.dusk}33`,
+                                borderWidth: 2,
+                                pointBackgroundColor: tokens.dusk,
+                                pointBorderColor: "#FFFDF8",
+                                pointBorderWidth: 1.5,
+                                pointRadius: 4,
+                            },
+                            {
+                                label: "Assessor / Supervisor",
+                                data: assessorData,
+                                borderColor: tokens.sageDark,
+                                backgroundColor: `${tokens.sage}33`,
+                                borderWidth: 2,
+                                pointBackgroundColor: tokens.sageDark,
+                                pointBorderColor: "#FFFDF8",
+                                pointBorderWidth: 1.5,
+                                pointRadius: 4,
+                            },
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: { duration: 450 },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                callbacks: {
+                                    label: (context) => ` ${context.dataset.label}: ${context.raw} / 5`
+                                }
+                            }
+                        },
+                        scales: {
+                            r: {
+                                min: 0,
+                                max: 5,
+                                ticks: { 
+                                    stepSize: 1, 
+                                    backdropColor: "transparent", 
+                                    color: tokens.inkSoft, 
+                                    font: { size: 10, family: "'IBM Plex Mono', monospace" } 
+                                },
+                                grid: { color: tokens.rule },
+                                angleLines: { color: tokens.rule },
+                                pointLabels: { 
+                                    font: { size: 11, family: "'Inter', sans-serif", weight: '500' }, 
+                                    color: tokens.ink 
+                                },
+                            },
+                        },
+                    },
+                });
+
+                return () => {
+                    if (chartRef.current) {
+                        chartRef.current.destroy();
+                        chartRef.current = null;
+                    }
+                };
+            }, [selfScores, assessorScores, competencies, tokens]);
+
+            return <canvas ref={canvasRef} role="img" aria-label="Radar chart comparing self and assessor scores" />;
+        }
+
+        function ReflectionDiaryMockup() {
+            const blankScores = () => ({
+                contribution: 3,
+                communication: 3,
+                collaboration: 3,
+                agile: 3,
+                continuous: 3,
+                leadership: 3,
+            });
+
+            const makeBlankEntryForm = () => ({
+                formId: `form-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                savedEntryId: null,
+                gigTitle: "",
+                category: "",
+                reflection: "",
+                attachments: [],
+                status: "",
+            });
+
+            // State definitions
+            const [scores, setScores] = useState(blankScores());
+            const [assessorScores, setAssessorScores] = useState(assessorDefaultScores);
+            const [savedSelfScores, setSavedSelfScores] = useState(blankScores());
+            const [savedAssessorScores, setSavedAssessorScores] = useState(assessorDefaultScores);
+
+            // The backend reflection record that the self-assessment scores
+            // (and, in turn, the assessor scores) are saved against. Kept in
+            // localStorage too so the radar chart still knows which
+            // reflection to update after a page refresh.
+            const [currentReflectionId, setCurrentReflectionId] = useState(() => {
+                try {
+                    return localStorage.getItem("alumableCurrentReflectionId") || null;
+                } catch (error) {
+                    return null;
+                }
+            });
+
+            const [entryForms, setEntryForms] = useState(() => [makeBlankEntryForm()]);
+            const [entries, setEntries] = useState(() => {
+                try {
+                    return JSON.parse(localStorage.getItem("alumableReflectionEntries") || "[]");
+                } catch (error) {
+                    return [];
+                }
+            });
+
+            // Saved-entry list controls: search, category filter and sorting
+            const [searchTerm, setSearchTerm] = useState("");
+            const [categoryFilter, setCategoryFilter] = useState("All");
+            const [sortBy, setSortBy] = useState("newest");
+
+            const [isAssessorReadOnly, setIsAssessorReadOnly] = useState(false);
+            const [selfSaveStatus, setSelfSaveStatus] = useState(null);
+            const [assessorSaveStatus, setAssessorSaveStatus] = useState(null);
+            const [radarLoadError, setRadarLoadError] = useState(null);
+
+            // Sprint 5: login state. `authTokenState` mirrors the
+            // module-level `authToken` variable in the api layer (see
+            // above) purely so the UI can re-render when it changes —
+            // the actual value every api.* call uses is the module one.
+            const [authTokenState, setAuthTokenState] = useState(() => {
+                try { return localStorage.getItem("alumableAuthToken") || null; } catch (error) { return null; }
+            });
+            const [authUser, setAuthUser] = useState(() => {
+                try { return JSON.parse(localStorage.getItem("alumableAuthUser") || "null"); } catch (error) { return null; }
+            });
+            const [loginEmail, setLoginEmail] = useState("");
+            const [loginPassword, setLoginPassword] = useState("");
+            const [loginError, setLoginError] = useState(null);
+            const [loginLoading, setLoginLoading] = useState(false);
+
+            // Sprint 5: self-serve registration, so testing doesn't have to
+            // wait on someone else to hand out a demo account.
+            const [authMode, setAuthMode] = useState("login"); // "login" | "register"
+            const [registerName, setRegisterName] = useState("");
+            const [registerEmail, setRegisterEmail] = useState("");
+            const [registerPassword, setRegisterPassword] = useState("");
+            const [registerRole, setRegisterRole] = useState("student");
+            const [registerError, setRegisterError] = useState(null);
+            const [registerLoading, setRegisterLoading] = useState(false);
+
+            const applyLoggedInSession = (token, user) => {
+                setStoredAuthToken(token);
+                setAuthTokenState(token);
+                setAuthUser(user || null);
+                try { localStorage.setItem("alumableAuthUser", JSON.stringify(user || null)); } catch (error) {}
+            };
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setLoginLoading(true);
+                setLoginError(null);
+                try {
+                    const res = await api.login(loginEmail.trim(), loginPassword);
+                    const token = res?.data?.token;
+                    if (!token) throw new Error("Login response did not include a token.");
+                    applyLoggedInSession(token, res?.data?.user);
+                    setLoginPassword("");
+                } catch (error) {
+                    setLoginError(error.message);
+                } finally {
+                    setLoginLoading(false);
+                }
+            };
+
+            const handleRegister = async (e) => {
+                e.preventDefault();
+                setRegisterLoading(true);
+                setRegisterError(null);
+                try {
+                    if (registerPassword.length < 8) {
+                        throw new Error("Password must be at least 8 characters.");
+                    }
+                    const res = await api.register(
+                        registerName.trim(),
+                        registerEmail.trim(),
+                        registerPassword,
+                        registerRole
+                    );
+                    const token = res?.data?.token;
+                    if (!token) throw new Error("Register response did not include a token.");
+                    // Registering logs the new account straight in, same as
+                    // AuthController's response shape for /login.
+                    applyLoggedInSession(token, res?.data?.user);
+                    setRegisterName("");
+                    setRegisterEmail("");
+                    setRegisterPassword("");
+                } catch (error) {
+                    setRegisterError(error.message);
+                } finally {
+                    setRegisterLoading(false);
+                }
+            };
+
+            const handleLogout = () => {
+                setStoredAuthToken(null);
+                setAuthTokenState(null);
+                setAuthUser(null);
+                try { localStorage.removeItem("alumableAuthUser"); } catch (error) {}
+            };
+
+            // Sync entries with LocalStorage
+            useEffect(() => {
+                localStorage.setItem("alumableReflectionEntries", JSON.stringify(entries));
+            }, [entries]);
+
+            // Sprint 5: rebuild the radar chart from the live API on load
+            // (and again right after logging in), instead of trusting
+            // whatever was last held in local state. `currentReflectionId`
+            // only remembers WHICH reflection to ask the server about; the
+            // actual scores always come from the backend, so a refresh (or
+            // opening the page on another device) shows the real saved
+            // data instead of resetting to defaults. This needs a token,
+            // since /reflections/{id} is now behind auth:sanctum.
+            useEffect(() => {
+                if (!currentReflectionId || !authTokenState) return;
+
+                api.getReflection(currentReflectionId)
+                    .then((res) => {
+                        const data = res?.data;
+                        if (!data) return;
+
+                        if (data.scores) {
+                            setScores({ ...blankScores(), ...data.scores });
+                            setSavedSelfScores({ ...blankScores(), ...data.scores });
+                        }
+
+                        const latestAssessment = (data.assessments || [])[data.assessments.length - 1];
+                        if (latestAssessment?.scores) {
+                            setAssessorScores({ ...assessorDefaultScores, ...latestAssessment.scores });
+                            setSavedAssessorScores({ ...assessorDefaultScores, ...latestAssessment.scores });
+                        }
+
+                        setRadarLoadError(null);
+                    })
+                    .catch((error) => {
+                        setRadarLoadError(error.message);
+                    });
+            // eslint-disable-next-line react-hooks/exhaustive-deps
+            }, [authTokenState]);
+
+            const updateEntryForm = (formId, field, value) => {
+                setEntryForms((forms) =>
+                    forms.map((form) =>
+                        form.formId === formId ? { ...form, [field]: value } : form
+                    )
+                );
+            };
+
+            const setFormStatus = (formId, message) => {
+                setEntryForms((forms) =>
+                    forms.map((form) =>
+                        form.formId === formId ? { ...form, status: message } : form
+                    )
+                );
+
+                if (message) {
+                    setTimeout(() => {
+                        setEntryForms((forms) =>
+                            forms.map((form) =>
+                                form.formId === formId && form.status === message
+                                    ? { ...form, status: "" }
+                                    : form
+                            )
+                        );
+                    }, 3500);
+                }
+            };
+
+            const handleFileUpload = (formId, e) => {
+                const files = Array.from(e.target.files || []);
+                if (files.length === 0) return;
+
+                files.forEach((file) => {
+                    const reader = new FileReader();
+                    reader.onload = (uploadEvent) => {
+                        const newAttachment = {
+                            id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+                            name: file.name,
+                            size: file.size,
+                            type: file.type.includes("pdf") ? "pdf" : "txt",
+                            dataUrl: uploadEvent.target.result,
+                        };
+
+                        setEntryForms((forms) =>
+                            forms.map((form) =>
+                                form.formId === formId
+                                    ? {
+                                          ...form,
+                                          attachments: [...(form.attachments || []), newAttachment],
+                                      }
+                                    : form
+                            )
+                        );
+                    };
+                    reader.readAsDataURL(file);
+                });
+
+                e.target.value = "";
+            };
+
+            const removeAttachment = (formId, attachmentId) => {
+                setEntryForms((forms) =>
+                    forms.map((form) =>
+                        form.formId === formId
+                            ? {
+                                  ...form,
+                                  attachments: (form.attachments || []).filter(
+                                      (att) => att.id !== attachmentId
+                                  ),
+                              }
+                            : form
+                    )
+                );
+            };
+
+            const addNewEntryForm = () => {
+                const newForm = makeBlankEntryForm();
+                setScores(blankScores());
+                setEntryForms([newForm]);
+
+                setTimeout(() => {
+                    document.getElementById(newForm.formId)?.scrollIntoView({
+                        behavior: "smooth",
+                        block: "start",
+                    });
+                }, 80);
+            };
+
+            const saveEntryForm = async (formId, createAnother = false) => {
+                const form = entryForms.find((item) => item.formId === formId);
+                if (!form) return;
+
+                if (!form.gigTitle.trim() || !form.reflection.trim()) {
+                    setFormStatus(
+                        formId,
+                        "Please enter both a Sprint / Gig Title and a Structured Reflection before saving."
+                    );
+                    return;
+                }
+
+                const now = new Date();
+                const entryId =
+                    form.savedEntryId ||
+                    `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+                const previousEntry = entries.find((entry) => entry.id === entryId);
+
+                const savedEntry = {
+                    id: entryId,
+                    gigTitle: form.gigTitle.trim(),
+                    category: form.category || "Other",
+                    reflection: form.reflection.trim(),
+                    attachments: form.attachments || [],
+                    scores: { ...scores },
+                    entryDate: previousEntry?.entryDate || now.toISOString(),
+                    updatedAt: now.toISOString(),
+                };
+
+                // Update local storage / state
+                setEntries((current) => {
+                    const exists = current.some((entry) => entry.id === entryId);
+                    return exists
+                        ? current.map((entry) => (entry.id === entryId ? savedEntry : entry))
+                        : [savedEntry, ...current];
+                });
+
+                // Update Radar live snapshot
+                setSavedSelfScores({ ...scores });
+
+                // Save to the backend (POST creates the reflection the
+                // first time, PUT updates it after that) and remember its
+                // id so the assessor's scores can be linked to it later.
+                api.saveReflectionEntry(savedEntry, currentReflectionId)
+                    .then((res) => {
+                        const id = res?.data?.id;
+                        if (id) {
+                            setCurrentReflectionId(id);
+                            try {
+                                localStorage.setItem("alumableCurrentReflectionId", id);
+                            } catch (error) {}
+                        }
+                    })
+                    .catch((error) => {
+                        setFormStatus(formId, `Saved locally, but the server rejected it: ${error.message}`);
+                    });
+
+                setEntryForms((forms) =>
+                    forms.map((item) =>
+                        item.formId === formId
+                            ? {
+                                  ...item,
+                                  savedEntryId: entryId,
+                                  status: createAnother
+                                      ? "Entry saved. A new form has been created."
+                                      : "Reflection entry & attachments saved to journal.",
+                              }
+                            : item
+                    )
+                );
+
+                if (createAnother) {
+                    addNewEntryForm();
+                } else {
+                    setTimeout(() => setFormStatus(formId, ""), 3500);
+                }
+            };
+
+            const loadEntry = (entry) => {
+                const existingForm = entryForms.find(
+                    (form) => form.savedEntryId === entry.id
+                );
+
+                if (existingForm) {
+                    setScores({ ...blankScores(), ...(entry.scores || {}) });
+                    setSavedSelfScores({ ...blankScores(), ...(entry.scores || {}) });
+                    setTimeout(() => {
+                        document.getElementById(existingForm.formId)?.scrollIntoView({
+                            behavior: "smooth",
+                            block: "center",
+                        });
+                    }, 50);
+                    return;
+                }
+
+                const loadedForm = {
+                    formId: `form-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                    savedEntryId: entry.id,
+                    gigTitle: entry.gigTitle || "",
+                    category: entry.category || "",
+                    reflection: entry.reflection || "",
+                    attachments: entry.attachments || [],
+                    status: "Saved reflection loaded.",
+                };
+
+                setEntryForms([loadedForm]);
+                setScores({ ...blankScores(), ...(entry.scores || {}) });
+                setSavedSelfScores({ ...blankScores(), ...(entry.scores || {}) });
+
+                setTimeout(() => {
+                    document.getElementById(loadedForm.formId)?.scrollIntoView({
+                        behavior: "smooth",
+                        block: "center",
+                    });
+                }, 80);
+
+                setTimeout(() => setFormStatus(loadedForm.formId, ""), 3000);
+            };
+
+            const deleteEntry = (entryId) => {
+                setEntries((current) => current.filter((entry) => entry.id !== entryId));
+
+                setEntryForms((forms) => {
+                    const deletedFormIsOpen = forms.some(
+                        (form) => form.savedEntryId === entryId
+                    );
+                    return deletedFormIsOpen ? [makeBlankEntryForm()] : forms;
+                });
+
+                const deletedEntry = entryForms.find((form) => form.savedEntryId === entryId);
+                if (deletedEntry) {
+                    setScores(blankScores());
+                }
+            };
+
+            const handleSaveSelfScores = () => {
+                setSavedSelfScores({ ...scores });
+                setSelfSaveStatus("saved");
+
+                api.saveSelfScores(scores, currentReflectionId)
+                    .then((res) => {
+                        const id = res?.data?.id;
+                        if (id) {
+                            setCurrentReflectionId(id);
+                            try {
+                                localStorage.setItem("alumableCurrentReflectionId", id);
+                            } catch (error) {}
+                        }
+                    })
+                    .catch((error) => {
+                        setSelfSaveStatus(`error: ${error.message}`);
+                    });
+
+                setTimeout(() => setSelfSaveStatus(null), 3000);
+            };
+
+            const handleSaveAssessorScores = () => {
+                setSavedAssessorScores({ ...assessorScores });
+                setAssessorSaveStatus("saved");
+
+                api.saveAssessorScores(assessorScores, currentReflectionId).catch((error) => {
+                    setAssessorSaveStatus(`error: ${error.message}`);
+                });
+
+                setTimeout(() => setAssessorSaveStatus(null), 3000);
+            };
+
+            const handleExportPDF = () => {
+                window.print();
+            };
+
+            // Apply search + category filter + sorting to the saved entries list.
+            // Existing entries created before categories were added remain usable.
+            const displayedEntries = entries
+                .filter((entry) => {
+                    const term = searchTerm.trim().toLowerCase();
+                    const category = entry.category || "Uncategorised";
+
+                    const matchesSearch =
+                        !term ||
+                        (entry.gigTitle || "").toLowerCase().includes(term) ||
+                        (entry.reflection || "").toLowerCase().includes(term) ||
+                        category.toLowerCase().includes(term);
+
+                    const matchesCategory =
+                        categoryFilter === "All" || category === categoryFilter;
+
+                    return matchesSearch && matchesCategory;
+                })
+                .sort((a, b) => {
+                    if (sortBy === "oldest") {
+                        return new Date(a.entryDate || 0) - new Date(b.entryDate || 0);
+                    }
+                    if (sortBy === "categoryAZ") {
+                        return (a.category || "Uncategorised").localeCompare(
+                            b.category || "Uncategorised"
+                        );
+                    }
+                    if (sortBy === "categoryZA") {
+                        return (b.category || "Uncategorised").localeCompare(
+                            a.category || "Uncategorised"
+                        );
+                    }
+                    return new Date(b.entryDate || 0) - new Date(a.entryDate || 0);
+                });
+
+            const hasActiveListControls =
+                searchTerm.trim() !== "" || categoryFilter !== "All" || sortBy !== "newest";
+
+            const clearListControls = () => {
+                setSearchTerm("");
+                setCategoryFilter("All");
+                setSortBy("newest");
+            };
+
+            const refMap = {
+                entry: useRef(null),
+                self: useRef(null),
+                assessor: useRef(null),
+                progress: useRef(null),
+            };
+
+            const scrollTo = (key) => refMap[key]?.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+            const today = new Date().toLocaleDateString("en-AU", { day: "2-digit", month: "short", year: "numeric" });
+
+            const TabButton = ({ tab, horizontal }) => (
+                <button
+                    onClick={() => scrollTo(tab.key)}
+                    className={
+                        horizontal
+                            ? "flex items-center gap-2 whitespace-nowrap px-4 py-2.5 rounded-full transition"
+                            : "group flex items-center gap-3 w-full px-4 py-3 rounded-r-lg transition hover:translate-x-1"
+                    }
+                    style={{
+                        backgroundColor: tokens.parchmentWarm,
+                        borderLeft: `4px solid ${tab.accent}`,
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.18)",
+                        color: tokens.ink,
+                    }}
+                >
+                    <span
+                        className="font-medium"
+                        style={{ fontFamily: "'IBM Plex Mono', monospace", color: tab.accentDark, fontSize: 11 }}
+                    >
+                        {tab.no}
+                    </span>
+                    <span className="text-sm font-medium">{tab.label}</span>
+                </button>
+            );
+
+            return (
+                <div
+                    style={{
+                        minHeight: "100vh",
+                        fontFamily: "'Inter', sans-serif",
+                        background: `radial-gradient(ellipse at top, ${tokens.canvas}, ${tokens.canvasDeep})`,
+                    }}
+                >
+                    <style>{`
+                        @import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,500&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+                        .diary-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 999px; outline: none; }
+                        .diary-slider::-webkit-slider-thumb {
+                            -webkit-appearance: none; appearance: none; width: 17px; height: 17px; border-radius: 999px;
+                            background: var(--thumb, #B8863B); border: 2.5px solid #FFFDF8; box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+                            cursor: pointer; margin-top: -6.5px;
+                        }
+                        .diary-slider::-moz-range-thumb {
+                            width: 17px; height: 17px; border-radius: 999px; background: var(--thumb, #B8863B);
+                            border: 2.5px solid #FFFDF8; box-shadow: 0 1px 3px rgba(0,0,0,0.35); cursor: pointer;
+                        }
+                        .diary-slider::-webkit-slider-runnable-track { height: 4px; border-radius: 999px; background: var(--track, #C9C2AA); }
+                        .diary-slider::-moz-range-track { height: 4px; border-radius: 999px; background: var(--track, #C9C2AA); }
+
+                        .ruled-textarea {
+                            line-height: 28px;
+                            padding-top: 0;
+                            background-image: linear-gradient(${tokens.rule} 1px, transparent 1px);
+                            background-size: 100% 28px;
+                            background-position: 0 27px;
+                            background-repeat: repeat-y;
+                        }
+                        .ruled-textarea::placeholder { color: #A9A48F; }
+                    `}</style>
+
+                    {/* Sprint 5: the backend now requires a login before any
+                        reflection/assessment can be saved, so this bar sits
+                        above everything else. */}
+                    <div className="no-print max-w-6xl mx-auto px-5 sm:px-8 pt-6">
+                        {authTokenState ? (
+                            <div
+                                className="flex flex-wrap items-center justify-between gap-3 rounded-lg px-4 py-2.5"
+                                style={{ backgroundColor: "rgba(124,148,132,0.14)", border: "1px solid rgba(124,148,132,0.35)" }}
+                            >
+                                <span className="text-xs" style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#D7DEEA" }}>
+                                    Logged in as {authUser?.email || authUser?.name || "user"}
+                                </span>
+                                <button
+                                    onClick={handleLogout}
+                                    className="text-xs font-medium px-3 py-1 rounded-full transition hover:bg-white/10"
+                                    style={{ color: "#D7DEEA", border: "1px solid rgba(255,255,255,0.25)" }}
+                                >
+                                    Log out
+                                </button>
+                            </div>
+                        ) : authMode === "login" ? (
+                            <form
+                                onSubmit={handleLogin}
+                                className="flex flex-col sm:flex-row sm:flex-wrap sm:items-end gap-2 rounded-lg px-4 py-3"
+                                style={{ backgroundColor: "rgba(184,134,59,0.12)", border: "1px solid rgba(184,134,59,0.4)" }}
+                            >
+                                <div className="flex-1">
+                                    <label className="block text-[10px] tracking-wider mb-1" style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#C9AE7E" }}>
+                                        EMAIL
+                                    </label>
+                                    <input
+                                        type="email"
+                                        required
+                                        value={loginEmail}
+                                        onChange={(e) => setLoginEmail(e.target.value)}
+                                        placeholder="you@example.com"
+                                        className="w-full rounded-md px-3 py-1.5 text-sm outline-none"
+                                        style={{ backgroundColor: "#1C2430", color: "#F8F4E9", border: "1px solid rgba(255,255,255,0.15)" }}
+                                    />
+                                </div>
+                                <div className="flex-1">
+                                    <label className="block text-[10px] tracking-wider mb-1" style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#C9AE7E" }}>
+                                        PASSWORD
+                                    </label>
+                                    <input
+                                        type="password"
+                                        required
+                                        value={loginPassword}
+                                        onChange={(e) => setLoginPassword(e.target.value)}
+                                        placeholder="********"
+                                        className="w-full rounded-md px-3 py-1.5 text-sm outline-none"
+                                        style={{ backgroundColor: "#1C2430", color: "#F8F4E9", border: "1px solid rgba(255,255,255,0.15)" }}
+                                    />
+                                </div>
+                                <button
+                                    type="submit"
+                                    disabled={loginLoading}
+                                    className="px-4 py-2 rounded-md text-sm font-medium transition disabled:opacity-50"
+                                    style={{ backgroundColor: tokens.brass, color: tokens.parchmentWarm }}
+                                >
+                                    {loginLoading ? "Logging in…" : "Log in"}
+                                </button>
+                                {loginError && (
+                                    <span className="text-xs font-medium self-center" style={{ color: "#E7A9A9", fontFamily: "'IBM Plex Mono', monospace" }}>
+                                        {loginError}
+                                    </span>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => { setAuthMode("register"); setLoginError(null); }}
+                                    className="text-xs underline text-left w-full sm:w-auto mt-1 sm:mt-0"
+                                    style={{ color: "#C9AE7E" }}
+                                >
+                                    Need an account? Register
+                                </button>
+                            </form>
+                        ) : (
+                            <form
+                                onSubmit={handleRegister}
+                                className="flex flex-col sm:flex-row sm:items-end gap-2 rounded-lg px-4 py-3 flex-wrap"
+                                style={{ backgroundColor: "rgba(184,134,59,0.12)", border: "1px solid rgba(184,134,59,0.4)" }}
+                            >
+                                <div className="flex-1" style={{ minWidth: 140 }}>
+                                    <label className="block text-[10px] tracking-wider mb-1" style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#C9AE7E" }}>
+                                        NAME
+                                    </label>
+                                    <input
+                                        type="text"
+                                        required
+                                        value={registerName}
+                                        onChange={(e) => setRegisterName(e.target.value)}
+                                        placeholder="Your name"
+                                        className="w-full rounded-md px-3 py-1.5 text-sm outline-none"
+                                        style={{ backgroundColor: "#1C2430", color: "#F8F4E9", border: "1px solid rgba(255,255,255,0.15)" }}
+                                    />
+                                </div>
+                                <div className="flex-1" style={{ minWidth: 160 }}>
+                                    <label className="block text-[10px] tracking-wider mb-1" style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#C9AE7E" }}>
+                                        EMAIL
+                                    </label>
+                                    <input
+                                        type="email"
+                                        required
+                                        value={registerEmail}
+                                        onChange={(e) => setRegisterEmail(e.target.value)}
+                                        placeholder="you@example.com"
+                                        className="w-full rounded-md px-3 py-1.5 text-sm outline-none"
+                                        style={{ backgroundColor: "#1C2430", color: "#F8F4E9", border: "1px solid rgba(255,255,255,0.15)" }}
+                                    />
+                                </div>
+                                <div className="flex-1" style={{ minWidth: 140 }}>
+                                    <label className="block text-[10px] tracking-wider mb-1" style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#C9AE7E" }}>
+                                        PASSWORD
+                                    </label>
+                                    <input
+                                        type="password"
+                                        required
+                                        minLength={8}
+                                        value={registerPassword}
+                                        onChange={(e) => setRegisterPassword(e.target.value)}
+                                        placeholder="min. 8 characters"
+                                        className="w-full rounded-md px-3 py-1.5 text-sm outline-none"
+                                        style={{ backgroundColor: "#1C2430", color: "#F8F4E9", border: "1px solid rgba(255,255,255,0.15)" }}
+                                    />
+                                </div>
+                                <div style={{ minWidth: 120 }}>
+                                    <label className="block text-[10px] tracking-wider mb-1" style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#C9AE7E" }}>
+                                        ROLE
+                                    </label>
+                                    <select
+                                        value={registerRole}
+                                        onChange={(e) => setRegisterRole(e.target.value)}
+                                        className="w-full rounded-md px-3 py-1.5 text-sm outline-none"
+                                        style={{ backgroundColor: "#1C2430", color: "#F8F4E9", border: "1px solid rgba(255,255,255,0.15)" }}
+                                    >
+                                        <option value="student">student</option>
+                                        <option value="assessor">assessor</option>
+                                    </select>
+                                </div>
+                                <button
+                                    type="submit"
+                                    disabled={registerLoading}
+                                    className="px-4 py-2 rounded-md text-sm font-medium transition disabled:opacity-50"
+                                    style={{ backgroundColor: tokens.brass, color: tokens.parchmentWarm }}
+                                >
+                                    {registerLoading ? "Registering…" : "Register"}
+                                </button>
+                                {registerError && (
+                                    <span className="text-xs font-medium self-center w-full" style={{ color: "#E7A9A9", fontFamily: "'IBM Plex Mono', monospace" }}>
+                                        {registerError}
+                                    </span>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => { setAuthMode("login"); setRegisterError(null); }}
+                                    className="text-xs underline text-left w-full sm:w-auto mt-1 sm:mt-0"
+                                    style={{ color: "#C9AE7E" }}
+                                >
+                                    Already have an account? Log in
+                                </button>
+                            </form>
+                        )}
+                    </div>
+
+                    <div className="max-w-6xl mx-auto px-5 sm:px-8 py-10 md:py-16 flex gap-8">
+                        {/* Desktop vertical tab index (hidden in print) */}
+                        <div className="no-print hidden md:flex flex-col gap-3.5 sticky top-10 self-start" style={{ width: 210 }}>
+                            <span
+                                className="px-1 pb-2 text-xs font-medium tracking-widest"
+                                style={{ color: "#8B93A0", fontFamily: "'IBM Plex Mono', monospace" }}
+                            >
+                                JUMP TO SECTION
+                            </span>
+                            {tabs.map((t) => (
+                                <TabButton key={t.key} tab={t} />
+                            ))}
+
+                            <div className="mt-6 px-4 py-4 rounded-lg" style={{ backgroundColor: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                                <p className="text-xs leading-relaxed" style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#8B93A0" }}>
+                                    This record stays with you after the subject ends.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                            {/* Mobile horizontal tabs (hidden in print) */}
+                            <div className="no-print flex md:hidden gap-2 overflow-x-auto pb-4 mb-2 -mx-1 px-1">
+                                {tabs.map((t) => (
+                                    <TabButton key={t.key} tab={t} horizontal />
+                                ))}
+                            </div>
+
+                            {/* Page shell */}
+                            <div
+                                className="page-shell rounded-xl p-6 sm:p-8 md:p-12 relative"
+                                style={{
+                                    backgroundColor: tokens.parchment,
+                                    boxShadow: "0 30px 60px -20px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.2)",
+                                }}
+                            >
+                                <div
+                                    className="absolute top-0 left-6 right-6 md:left-10 md:right-10 h-0.5"
+                                    style={{ background: `linear-gradient(90deg, transparent, ${tokens.brass}, transparent)`, opacity: 0.6 }}
+                                />
+
+                                {/* Header */}
+                                <header className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-6 pb-7 mb-9" style={{ borderBottom: `1px solid ${tokens.rule}` }}>
+                                    <div>
+                                        <span
+                                            className="text-xs font-medium tracking-widest"
+                                            style={{ fontFamily: "'IBM Plex Mono', monospace", color: tokens.brassDark }}
+                                        >
+                                            ALUMABLE · REFLECTION DIARY
+                                        </span>
+                                        <h1
+                                            className="mt-2 text-3xl sm:text-4xl md:text-[2.75rem] leading-tight"
+                                            style={{ fontFamily: "'Newsreader', serif", fontStyle: "italic", color: tokens.ink }}
+                                        >
+                                            My Reflection Journal
+                                        </h1>
+                                        <div className="flex items-center gap-3 mt-3">
+                                            <span className="h-px w-8" style={{ backgroundColor: tokens.rule }} />
+                                            <span style={{ color: tokens.brass, fontSize: 10 }}>◆</span>
+                                            <span className="h-px w-8" style={{ backgroundColor: tokens.rule }} />
+                                        </div>
+                                    </div>
+
+                                    <div className="flex flex-col items-start sm:items-end gap-3">
+                                        <span
+                                            className="text-xs px-2.5 py-1 rounded-full"
+                                            style={{ fontFamily: "'IBM Plex Mono', monospace", color: tokens.inkSoft, border: `1px solid ${tokens.rule}` }}
+                                        >
+                                            Entry dated {today} · {entries.length} saved
+                                        </span>
+                                        <div className="flex flex-wrap gap-2 justify-start sm:justify-end">
+                                            <button
+                                                onClick={handleExportPDF}
+                                                className="no-print flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium transition hover:brightness-110 hover:-translate-y-0.5"
+                                                style={{
+                                                    backgroundColor: tokens.brass,
+                                                    color: tokens.parchmentWarm,
+                                                    boxShadow: "0 4px 14px rgba(184,134,59,0.4), inset 0 1px 0 rgba(255,255,255,0.25)",
+                                                }}
+                                            >
+                                                <Download size={16} />
+                                                Export Journal (PDF)
+                                            </button>
+                                        </div>
+                                    </div>
+                                </header>
+
+                                {/* 01 — New Entry */}
+                                <section ref={refMap.entry} className="mb-14 scroll-mt-10">
+                                    <div className="grid gap-8">
+                                        {entryForms.map((form, formIndex) => (
+                                            <div
+                                                key={form.formId}
+                                                id={form.formId}
+                                                className="rounded-xl p-5 sm:p-6 scroll-mt-24"
+                                                style={{
+                                                    backgroundColor: formIndex === 0 ? "transparent" : "rgba(255,253,248,0.62)",
+                                                    border: formIndex === 0 ? "1px solid transparent" : `1px solid ${tokens.rule}`,
+                                                    boxShadow: formIndex === 0 ? "none" : "0 3px 12px rgba(0,0,0,0.05)",
+                                                }}
+                                            >
+                                                <div className="flex items-start justify-between gap-4 mb-5">
+                                                    <div>
+                                                        <SectionEyebrow
+                                                            no="01"
+                                                            label="New Entry"
+                                                            accent={tokens.brass}
+                                                            accentDark={tokens.brassDark}
+                                                        />
+                                                        <p className="text-sm mt-1" style={{ color: tokens.inkSoft }}>
+                                                            Log what you did, and what it taught you, while it's still fresh.
+                                                        </p>
+                                                    </div>
+
+                                                    <span
+                                                        className="text-xs px-2.5 py-1 rounded-full shrink-0 font-medium"
+                                                        style={{
+                                                            fontFamily: "'IBM Plex Mono', monospace",
+                                                            color: form.savedEntryId ? tokens.sageDark : tokens.brassDark,
+                                                            backgroundColor: form.savedEntryId ? "rgba(124,148,132,0.14)" : tokens.brassTint,
+                                                        }}
+                                                    >
+                                                        {form.savedEntryId ? "EDITING SAVED" : `ACTIVE FORM`}
+                                                    </span>
+                                                </div>
+
+                                                <label className="block text-xs font-medium mb-1.5 tracking-wide" style={{ color: tokens.inkSoft }}>
+                                                    SPRINT / GIG TITLE
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    value={form.gigTitle}
+                                                    onChange={(e) => updateEntryForm(form.formId, "gigTitle", e.target.value)}
+                                                    placeholder="e.g. Sprint 3 — Alumable Capstone Team"
+                                                    className="w-full bg-transparent pb-2.5 mb-5 text-lg outline-none transition"
+                                                    style={{
+                                                        borderBottom: `1px solid ${tokens.rule}`,
+                                                        color: tokens.ink,
+                                                        fontFamily: "'Newsreader', serif"
+                                                    }}
+                                                />
+
+                                                <div className="mb-7">
+                                                    <label className="block text-xs font-medium mb-1.5 tracking-wide" style={{ color: tokens.inkSoft }}>
+                                                        CATEGORY
+                                                    </label>
+                                                    <select
+                                                        value={form.category || ""}
+                                                        onChange={(e) => updateEntryForm(form.formId, "category", e.target.value)}
+                                                        className="w-full sm:w-72 rounded-md px-3 py-2 text-sm outline-none"
+                                                        style={{
+                                                            border: `1px solid ${tokens.rule}`,
+                                                            backgroundColor: tokens.parchmentWarm,
+                                                            color: form.category ? tokens.ink : tokens.inkSoft,
+                                                        }}
+                                                    >
+                                                        <option value="">Select a category</option>
+                                                        {reflectionCategories.map((category) => (
+                                                            <option key={category} value={category}>{category}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+
+                                                <label className="block text-xs font-medium mb-2 tracking-wide" style={{ color: tokens.inkSoft }}>
+                                                    STRUCTURED REFLECTION
+                                                </label>
+                                                <textarea
+                                                    rows={7}
+                                                    value={form.reflection}
+                                                    onChange={(e) => updateEntryForm(form.formId, "reflection", e.target.value)}
+                                                    placeholder="What did you contribute this sprint? What would you do differently next time?"
+                                                    className="ruled-textarea w-full rounded-md px-4 outline-none resize-none text-[15px]"
+                                                    style={{
+                                                        border: `1px solid ${tokens.rule}`,
+                                                        backgroundColor: tokens.parchmentWarm,
+                                                        color: tokens.ink,
+                                                        boxShadow: "inset 0 1px 4px rgba(0,0,0,0.05)",
+                                                    }}
+                                                />
+
+                                                {/* File Upload Section */}
+                                                <div className="no-print mt-4">
+                                                    <input
+                                                        type="file"
+                                                        id={`file-input-${form.formId}`}
+                                                        accept=".pdf,.txt,text/plain,application/pdf"
+                                                        multiple
+                                                        onChange={(e) => handleFileUpload(form.formId, e)}
+                                                        className="hidden"
+                                                    />
+
+                                                    <div className="flex flex-wrap items-center gap-3">
+                                                        <label
+                                                            htmlFor={`file-input-${form.formId}`}
+                                                            className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition cursor-pointer hover:bg-black/5"
+                                                            style={{ border: `1px dashed ${tokens.brass}`, color: tokens.brassDark }}
+                                                        >
+                                                            <Paperclip size={15} />
+                                                            Attach Evidence (.PDF or .TXT)
+                                                        </label>
+                                                        <p className="text-xs" style={{ color: tokens.inkSoft }}>
+                                                            Upload PDF documents or TXT files to store with this reflection.
+                                                        </p>
+                                                    </div>
+
+                                                    {/* Staged Attachments in Current Form */}
+                                                    {form.attachments && form.attachments.length > 0 && (
+                                                        <div className="mt-3 flex flex-wrap gap-2">
+                                                            {form.attachments.map((att) => (
+                                                                <div
+                                                                    key={att.id}
+                                                                    className="flex items-center gap-2 px-3 py-1.5 rounded text-xs"
+                                                                    style={{
+                                                                        backgroundColor: tokens.parchmentWarm,
+                                                                        border: `1px solid ${tokens.rule}`,
+                                                                        color: tokens.ink,
+                                                                    }}
+                                                                >
+                                                                    <FileText size={13} style={{ color: tokens.brassDark }} />
+                                                                    <a
+                                                                        href={att.dataUrl}
+                                                                        download={att.name}
+                                                                        className="font-medium hover:underline max-w-[180px] truncate"
+                                                                        title="Click to download/preview"
+                                                                    >
+                                                                        {att.name}
+                                                                    </a>
+                                                                    <span style={{ color: tokens.inkSoft }}>
+                                                                        ({formatFileSize(att.size)})
+                                                                    </span>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => removeAttachment(form.formId, att.id)}
+                                                                        className="ml-1 p-0.5 rounded transition hover:bg-black/10 text-red-600"
+                                                                        title="Remove attachment"
+                                                                    >
+                                                                        <X size={13} />
+                                                                    </button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                <div className="mt-7 pt-6" style={{ borderTop: `1px solid ${tokens.rule}` }}>
+                                                    <div className="no-print flex flex-col sm:flex-row flex-wrap gap-3">
+                                                        <button
+                                                            onClick={() => saveEntryForm(form.formId, false)}
+                                                            className="px-5 py-2.5 rounded-md text-sm font-medium transition hover:brightness-105"
+                                                            style={{
+                                                                backgroundColor: tokens.brass,
+                                                                color: tokens.parchmentWarm,
+                                                                boxShadow: "0 3px 10px rgba(184,134,59,0.25)",
+                                                            }}
+                                                        >
+                                                            {form.savedEntryId ? "Update Reflection Entry" : "Save Reflection Entry"}
+                                                        </button>
+
+                                                        <button
+                                                            onClick={() => saveEntryForm(form.formId, true)}
+                                                            className="px-5 py-2.5 rounded-md text-sm font-medium transition hover:bg-black/5"
+                                                            style={{
+                                                                border: `1px solid ${tokens.brass}`,
+                                                                color: tokens.brassDark,
+                                                                backgroundColor: tokens.parchmentWarm,
+                                                            }}
+                                                        >
+                                                            Save & Create New Entry
+                                                        </button>
+
+                                                        <button
+                                                            onClick={addNewEntryForm}
+                                                            className="px-5 py-2.5 rounded-md text-sm font-medium transition hover:bg-black/5"
+                                                            style={{
+                                                                border: `1px dashed ${tokens.brass}`,
+                                                                color: tokens.brassDark,
+                                                                backgroundColor: "transparent",
+                                                            }}
+                                                        >
+                                                            + New Blank Entry
+                                                        </button>
+                                                    </div>
+
+                                                    {form.status && (
+                                                        <p
+                                                            className="mt-3 text-sm font-medium"
+                                                            style={{
+                                                                color: form.status.startsWith("Please") ? tokens.wineDark : tokens.sageDark,
+                                                                fontFamily: "'IBM Plex Mono', monospace",
+                                                            }}
+                                                        >
+                                                            {form.status}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    {/* Saved Reflections List */}
+                                    <div className="mt-8 pt-7" style={{ borderTop: `1px solid ${tokens.rule}` }}>
+                                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                                            <div>
+                                                <h3
+                                                    className="text-base font-medium"
+                                                    style={{ color: tokens.ink, fontFamily: "'Newsreader', serif" }}
+                                                >
+                                                    Saved Reflection Entries
+                                                </h3>
+                                                <p className="text-xs mt-1" style={{ color: tokens.inkSoft }}>
+                                                    Search, filter and sort your saved reflection history.
+                                                </p>
+                                            </div>
+                                            <span
+                                                className="text-xs px-2.5 py-1 rounded-full self-start sm:self-auto"
+                                                style={{
+                                                    color: tokens.inkSoft,
+                                                    border: `1px solid ${tokens.rule}`,
+                                                    fontFamily: "'IBM Plex Mono', monospace",
+                                                }}
+                                            >
+                                                {displayedEntries.length} of {entries.length} shown
+                                            </span>
+                                        </div>
+
+                                        {/* ARDBRS22-50 + ARDBRS22-52: Search, filter and sort controls */}
+                                        <div
+                                            className="no-print rounded-lg p-3 sm:p-4 mb-5 grid gap-3 lg:grid-cols-[1fr_auto_auto_auto]"
+                                            style={{ backgroundColor: "rgba(255,253,248,0.72)", border: `1px solid ${tokens.rule}` }}
+                                        >
+                                            <div>
+                                                <label className="block text-[10px] font-medium tracking-wider mb-1" style={{ color: tokens.inkSoft, fontFamily: "'IBM Plex Mono', monospace" }}>
+                                                    SEARCH
+                                                </label>
+                                                <input
+                                                    type="search"
+                                                    value={searchTerm}
+                                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                                    placeholder="Search title, reflection or category..."
+                                                    className="w-full rounded-md px-3 py-2 text-sm outline-none"
+                                                    style={{ backgroundColor: tokens.parchmentWarm, border: `1px solid ${tokens.rule}`, color: tokens.ink }}
+                                                />
+                                            </div>
+
+                                            <div>
+                                                <label className="block text-[10px] font-medium tracking-wider mb-1" style={{ color: tokens.inkSoft, fontFamily: "'IBM Plex Mono', monospace" }}>
+                                                    CATEGORY
+                                                </label>
+                                                <select
+                                                    value={categoryFilter}
+                                                    onChange={(e) => setCategoryFilter(e.target.value)}
+                                                    className="w-full lg:w-44 rounded-md px-3 py-2 text-sm outline-none"
+                                                    style={{ backgroundColor: tokens.parchmentWarm, border: `1px solid ${tokens.rule}`, color: tokens.ink }}
+                                                >
+                                                    <option value="All">All categories</option>
+                                                    {reflectionCategories.map((category) => (
+                                                        <option key={category} value={category}>{category}</option>
+                                                    ))}
+                                                    {entries.some((entry) => !entry.category) && (
+                                                        <option value="Uncategorised">Uncategorised</option>
+                                                    )}
+                                                </select>
+                                            </div>
+
+                                            <div>
+                                                <label className="block text-[10px] font-medium tracking-wider mb-1" style={{ color: tokens.inkSoft, fontFamily: "'IBM Plex Mono', monospace" }}>
+                                                    SORT BY
+                                                </label>
+                                                <select
+                                                    value={sortBy}
+                                                    onChange={(e) => setSortBy(e.target.value)}
+                                                    className="w-full lg:w-44 rounded-md px-3 py-2 text-sm outline-none"
+                                                    style={{ backgroundColor: tokens.parchmentWarm, border: `1px solid ${tokens.rule}`, color: tokens.ink }}
+                                                >
+                                                    <option value="newest">Newest first</option>
+                                                    <option value="oldest">Oldest first</option>
+                                                    <option value="categoryAZ">Category A–Z</option>
+                                                    <option value="categoryZA">Category Z–A</option>
+                                                </select>
+                                            </div>
+
+                                            <div className="flex items-end">
+                                                <button
+                                                    type="button"
+                                                    onClick={clearListControls}
+                                                    disabled={!hasActiveListControls}
+                                                    className="w-full lg:w-auto px-3 py-2 rounded-md text-xs font-medium transition disabled:opacity-40 disabled:cursor-not-allowed hover:bg-black/5"
+                                                    style={{ border: `1px solid ${tokens.rule}`, color: tokens.inkSoft, backgroundColor: "transparent" }}
+                                                >
+                                                    Clear
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {entries.length === 0 ? (
+                                            <p className="text-sm" style={{ color: tokens.inkSoft }}>
+                                                No entries saved yet. Reflections you save will appear here.
+                                            </p>
+                                        ) : displayedEntries.length === 0 ? (
+                                            <div
+                                                className="rounded-lg px-4 py-5 text-center"
+                                                style={{ backgroundColor: tokens.parchmentWarm, border: `1px dashed ${tokens.rule}` }}
+                                            >
+                                                <p className="text-sm font-medium" style={{ color: tokens.ink }}>
+                                                    No matching reflections found.
+                                                </p>
+                                                <p className="text-xs mt-1" style={{ color: tokens.inkSoft }}>
+                                                    Try a different keyword or category.
+                                                </p>
+                                            </div>
+                                        ) : (
+                                            <div className="grid gap-3">
+                                                {displayedEntries.map((entry, index) => {
+                                                    const category = entry.category || "Uncategorised";
+                                                    const attachmentCount = entry.attachments?.length || 0;
+
+                                                    return (
+                                                        <article
+                                                            key={entry.id}
+                                                            className="w-full rounded-xl p-4 sm:p-5 transition hover:-translate-y-0.5"
+                                                            style={{
+                                                                backgroundColor: tokens.parchmentWarm,
+                                                                border: `1px solid ${tokens.rule}`,
+                                                                boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+                                                            }}
+                                                        >
+                                                            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                                                                <div className="flex-1 min-w-0">
+                                                                    <div className="flex flex-wrap items-center gap-2 mb-2">
+                                                                        <span
+                                                                            className="inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-medium tracking-wide"
+                                                                            style={{
+                                                                                backgroundColor: category === "Uncategorised" ? "rgba(107,102,86,0.10)" : tokens.brassTint,
+                                                                                color: category === "Uncategorised" ? tokens.inkSoft : tokens.brassDark,
+                                                                                fontFamily: "'IBM Plex Mono', monospace",
+                                                                            }}
+                                                                        >
+                                                                            {category}
+                                                                        </span>
+                                                                        <span className="text-[11px]" style={{ color: "#8E8978", fontFamily: "'IBM Plex Mono', monospace" }}>
+                                                                            {new Date(entry.entryDate).toLocaleDateString("en-AU", {
+                                                                                day: "2-digit",
+                                                                                month: "short",
+                                                                                year: "numeric",
+                                                                            })}
+                                                                        </span>
+                                                                    </div>
+
+                                                                    <h4 className="text-base font-semibold" style={{ color: tokens.ink }}>
+                                                                        {entry.gigTitle}
+                                                                    </h4>
+                                                                    <p className="mt-1.5 text-sm line-clamp-2 leading-relaxed" style={{ color: tokens.inkSoft }}>
+                                                                        {entry.reflection}
+                                                                    </p>
+
+                                                                    <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]" style={{ color: tokens.inkSoft, fontFamily: "'IBM Plex Mono', monospace" }}>
+                                                                        <span className="inline-flex items-center gap-1.5">
+                                                                            <Paperclip size={12} />
+                                                                            {attachmentCount} {attachmentCount === 1 ? "attachment" : "attachments"}
+                                                                        </span>
+                                                                        <span aria-hidden="true">·</span>
+                                                                        <span>
+                                                                            Updated {new Date(entry.updatedAt || entry.entryDate).toLocaleDateString("en-AU")}
+                                                                        </span>
+                                                                    </div>
+
+                                                                    {/* Saved Files Preview */}
+                                                                    {attachmentCount > 0 && (
+                                                                        <div className="mt-3 flex flex-wrap gap-2">
+                                                                            {entry.attachments.map((file) => (
+                                                                                <a
+                                                                                    key={file.id}
+                                                                                    href={file.dataUrl}
+                                                                                    download={file.name}
+                                                                                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium transition hover:underline"
+                                                                                    style={{
+                                                                                        backgroundColor: tokens.brassTint,
+                                                                                        color: tokens.brassDark,
+                                                                                        border: `1px solid rgba(184,134,59,0.25)`,
+                                                                                        fontFamily: "'IBM Plex Mono', monospace",
+                                                                                    }}
+                                                                                >
+                                                                                    <FileText size={11} />
+                                                                                    <span className="max-w-[160px] truncate">{file.name}</span>
+                                                                                    <Download size={10} />
+                                                                                </a>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+
+                                                                <div className="flex sm:flex-col items-center sm:items-end gap-2 shrink-0">
+                                                                    <span
+                                                                        className="text-[10px] font-medium px-2 py-1 rounded"
+                                                                        style={{ color: tokens.brassDark, backgroundColor: tokens.brassTint, fontFamily: "'IBM Plex Mono', monospace" }}
+                                                                    >
+                                                                        #{displayedEntries.length - index}
+                                                                    </span>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => loadEntry(entry)}
+                                                                        className="no-print px-3 py-1.5 rounded-md text-xs font-medium transition hover:brightness-105"
+                                                                        style={{
+                                                                            backgroundColor: tokens.brass,
+                                                                            color: tokens.parchmentWarm,
+                                                                        }}
+                                                                    >
+                                                                        View / Edit
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => deleteEntry(entry.id)}
+                                                                        className="no-print px-3 py-1.5 rounded-md text-xs font-medium transition hover:bg-black/5"
+                                                                        style={{
+                                                                            border: `1px solid ${tokens.wine}`,
+                                                                            color: tokens.wineDark,
+                                                                            backgroundColor: "transparent",
+                                                                        }}
+                                                                    >
+                                                                        Delete
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </article>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+                                </section>
+
+                                {/* 02 — Self-Assessment */}
+                                <section ref={refMap.self} className="mb-14 scroll-mt-10">
+                                    <SectionEyebrow no="02" label="Self-Assessment" accent={tokens.dusk} accentDark={tokens.duskDark} />
+                                    <p className="text-sm mb-7" style={{ color: tokens.inkSoft }}>
+                                        Rate yourself, 1 to 5, against the six capstone competencies.
+                                    </p>
+
+                                    <div className="grid gap-4 sm:grid-cols-2">
+                                        {competencies.map((c) => (
+                                            <div
+                                                key={c.key}
+                                                className="rounded-lg p-4"
+                                                style={{ backgroundColor: tokens.parchmentWarm, border: `1px solid ${tokens.rule}` }}
+                                            >
+                                                <div className="flex items-center justify-between mb-3">
+                                                    <span className="text-sm font-medium" style={{ color: tokens.ink }}>
+                                                        {c.label}
+                                                    </span>
+                                                    <span
+                                                        className="text-xs px-2 py-0.5 rounded font-medium"
+                                                        style={{ fontFamily: "'IBM Plex Mono', monospace", backgroundColor: "rgba(92,122,147,0.12)", color: tokens.duskDark }}
+                                                    >
+                                                        {scores[c.key]} / 5
+                                                    </span>
+                                                </div>
+                                                <input
+                                                    type="range"
+                                                    min={1}
+                                                    max={5}
+                                                    step={1}
+                                                    value={scores[c.key]}
+                                                    onChange={(e) => setScores((s) => ({ ...s, [c.key]: Number(e.target.value) }))}
+                                                    className="diary-slider"
+                                                    style={{ "--thumb": tokens.dusk, "--track": tokens.rule }}
+                                                />
+                                                <div className="flex justify-between mt-1.5">
+                                                    {[1, 2, 3, 4, 5].map((n) => (
+                                                        <span key={n} className="text-xs font-mono" style={{ color: "#A9A48F" }}>
+                                                            {n}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    <div className="no-print mt-6 flex items-center gap-4 flex-wrap">
+                                        <button
+                                            onClick={handleSaveSelfScores}
+                                            className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition hover:brightness-110"
+                                            style={{ backgroundColor: tokens.dusk, color: tokens.parchmentWarm }}
+                                        >
+                                            Save Scores
+                                        </button>
+                                        {selfSaveStatus === "saved" && (
+                                            <span className="text-xs font-medium" style={{ color: tokens.sageDark, fontFamily: "'IBM Plex Mono', monospace" }}>
+                                                ✓ Scores saved — radar chart updated.
+                                            </span>
+                                        )}
+                                        {selfSaveStatus && selfSaveStatus.startsWith("error:") && (
+                                            <span className="text-xs font-medium" style={{ color: tokens.wineDark, fontFamily: "'IBM Plex Mono', monospace" }}>
+                                                ✕ {selfSaveStatus.replace("error: ", "")}
+                                            </span>
+                                        )}
+                                    </div>
+                                </section>
+
+                                {/* 03 — Assessor Feedback */}
+                                <section
+                                    ref={refMap.assessor}
+                                    className="mb-14 rounded-xl p-6 md:p-8 scroll-mt-10"
+                                    style={{ backgroundColor: tokens.sagePanel, border: `1px solid ${tokens.sage}`, boxShadow: "0 4px 16px rgba(63,90,69,0.08)" }}
+                                >
+                                    <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
+                                        <SectionEyebrow no="03" label="Supervisor / Assessor Feedback" accent={tokens.sage} accentDark={tokens.sageDark} />
+                                        <button
+                                            onClick={() => setIsAssessorReadOnly(!isAssessorReadOnly)}
+                                            className="no-print flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full transition hover:bg-black/5"
+                                            style={{ backgroundColor: tokens.parchmentWarm, color: tokens.sageDark, border: `1px solid ${tokens.sage}` }}
+                                        >
+                                            {isAssessorReadOnly ? <Lock size={12} /> : <Unlock size={12} />}
+                                            {isAssessorReadOnly ? "Locked (Read-only)" : "Supervisor Edit Mode"}
+                                        </button>
+                                    </div>
+                                    <p className="text-sm mb-6" style={{ color: tokens.sageDark }}>
+                                        {isAssessorReadOnly 
+                                            ? "Completed by your supervisor or employer — read-only view." 
+                                            : "For supervisor or employer: rate the student, 1 to 5, across the six competencies."}
+                                    </p>
+
+                                    <div className="grid gap-4 sm:grid-cols-2">
+                                        {competencies.map((c) => {
+                                            const val = assessorScores[c.key];
+                                            return (
+                                                <div
+                                                    key={c.key}
+                                                    className="rounded-lg p-4"
+                                                    style={{ backgroundColor: tokens.parchmentWarm, border: `1px solid rgba(124,148,132,0.35)` }}
+                                                >
+                                                    <div className="flex items-center justify-between mb-3">
+                                                        <span className="text-sm font-medium" style={{ color: tokens.ink }}>
+                                                            {c.label}
+                                                        </span>
+                                                        <span
+                                                            className="text-xs px-2 py-0.5 rounded font-medium"
+                                                            style={{ fontFamily: "'IBM Plex Mono', monospace", backgroundColor: "rgba(63,90,69,0.12)", color: tokens.sageDark }}
+                                                        >
+                                                            {val} / 5
+                                                        </span>
+                                                    </div>
+
+                                                    {isAssessorReadOnly ? (
+                                                        <div className="w-full h-2 rounded-full my-2" style={{ backgroundColor: "#D9DFD3" }}>
+                                                            <div className="h-2 rounded-full transition-all duration-300" style={{ width: `${(val / 5) * 100}%`, backgroundColor: tokens.sage }} />
+                                                        </div>
+                                                    ) : (
+                                                        <>
+                                                            <input
+                                                                type="range"
+                                                                min={1}
+                                                                max={5}
+                                                                step={1}
+                                                                value={val}
+                                                                onChange={(e) => setAssessorScores((s) => ({ ...s, [c.key]: Number(e.target.value) }))}
+                                                                className="diary-slider"
+                                                                style={{ "--thumb": tokens.sageDark, "--track": "rgba(124,148,132,0.35)" }}
+                                                            />
+                                                            <div className="flex justify-between mt-1.5">
+                                                                {[1, 2, 3, 4, 5].map((n) => (
+                                                                    <span key={n} className="text-xs font-mono" style={{ color: "#9BAF9E" }}>
+                                                                        {n}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+
+                                    {!isAssessorReadOnly && (
+                                        <div className="no-print mt-6 flex items-center gap-4 flex-wrap">
+                                            <button
+                                                onClick={handleSaveAssessorScores}
+                                                className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition hover:brightness-110"
+                                                style={{ backgroundColor: tokens.sageDark, color: tokens.parchmentWarm }}
+                                            >
+                                                Save Assessor Scores
+                                            </button>
+                                            {assessorSaveStatus === "saved" && (
+                                                <span className="text-xs font-medium" style={{ color: tokens.sageDark, fontFamily: "'IBM Plex Mono', monospace" }}>
+                                                    ✓ Assessor scores saved — radar chart updated.
+                                                </span>
+                                            )}
+                                            {assessorSaveStatus && assessorSaveStatus.startsWith("error:") && (
+                                                <span className="text-xs font-medium" style={{ color: tokens.wineDark, fontFamily: "'IBM Plex Mono', monospace" }}>
+                                                    ✕ {assessorSaveStatus.replace("error: ", "")}
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
+                                </section>
+
+                                {/* 04 — Progress Overview (Active Radar Chart) */}
+                                <section ref={refMap.progress} className="scroll-mt-10">
+                                    <SectionEyebrow no="04" label="Progress Overview" accent={tokens.wine} accentDark={tokens.wineDark} />
+                                    <p className="text-sm mb-7" style={{ color: tokens.inkSoft }}>
+                                        Self vs. assessor scores across all six competencies.
+                                    </p>
+
+                                    <div
+                                        className="mx-auto rounded-xl relative"
+                                        style={{
+                                            border: `1px solid ${tokens.wine}55`,
+                                            backgroundColor: tokens.parchmentWarm,
+                                            boxShadow: "0 4px 16px rgba(140,91,98,0.08)",
+                                            maxWidth: 520,
+                                            padding: 24,
+                                        }}
+                                    >
+                                        <div className="flex items-center justify-center gap-6 mb-4">
+                                            <span className="flex items-center gap-1.5 text-xs font-medium" style={{ color: tokens.duskDark }}>
+                                                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: tokens.dusk }} />
+                                                Self-Assessment
+                                            </span>
+                                            <span className="flex items-center gap-1.5 text-xs font-medium" style={{ color: tokens.sageDark }}>
+                                                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: tokens.sageDark }} />
+                                                Assessor / Supervisor
+                                            </span>
+                                        </div>
+                                        
+                                        <div style={{ height: 320 }} className="relative">
+                                            <RadarChart
+                                                selfScores={savedSelfScores}
+                                                assessorScores={savedAssessorScores}
+                                                competencies={competencies}
+                                                tokens={tokens}
+                                            />
+                                        </div>
+                                        
+                                        <p
+                                            className="no-print text-xs text-center mt-4"
+                                            style={{ fontFamily: "'IBM Plex Mono', monospace", color: tokens.inkSoft }}
+                                        >
+                                            {currentReflectionId
+                                                ? "Loaded from the live server — updates when you save reflections or competency scores above."
+                                                : "Updates live when you save reflections or competency scores above."}
+                                        </p>
+                                        {radarLoadError && (
+                                            <p
+                                                className="no-print text-xs text-center mt-1"
+                                                style={{ fontFamily: "'IBM Plex Mono', monospace", color: tokens.wineDark }}
+                                            >
+                                                Could not refresh from the server: {radarLoadError}
+                                            </p>
+                                        )}
+                                    </div>
+                                </section>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Render Component to DOM
+        ReactDOM.createRoot(document.getElementById('root')).render(<ReflectionDiaryMockup />);
+    </script>
+</body>
+</html>
