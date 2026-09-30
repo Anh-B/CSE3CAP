@@ -9,6 +9,16 @@ class AssessmentController extends Controller
 {
     public function store(Request $request)
     {
+        // Only assessor accounts can score a reflection. Before this,
+        // any logged-in user (including a student) could call this and
+        // assess someone else's reflection.
+        if (auth()->user()->role !== 'assessor') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only assessor accounts can submit an assessment.'
+            ], 403);
+        }
+
     // Validation dữ liệu
         $validated = $request->validate([
             'reflection_id' => 'required|exists:reflections,id', // Bài đánh giá phải tồn tại trong CSDL

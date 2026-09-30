@@ -19,10 +19,14 @@ class AuthController extends Controller
             'name'     => 'required|string|max:255',
             'email'    => 'required|email|unique:users,email',
             'password' => 'required|string|min:8|confirmed',
+            // Optional - defaults to 'student' below if not sent, so
+            // existing clients that don't know about roles yet keep working.
+            'role'     => 'nullable|in:student,assessor',
         ], [
             'email.unique'         => 'An account with that email already exists.',
             'password.min'         => 'Password must be at least 8 characters.',
             'password.confirmed'   => 'Password confirmation does not match.',
+            'role.in'              => 'Role must be either student or assessor.',
         ]);
 
         // The User model casts 'password' => 'hashed', so this is
@@ -31,6 +35,7 @@ class AuthController extends Controller
             'name'     => $validated['name'],
             'email'    => $validated['email'],
             'password' => $validated['password'],
+            'role'     => $validated['role'] ?? 'student',
         ]);
 
         $token = $user->createToken('api-token')->plainTextToken;

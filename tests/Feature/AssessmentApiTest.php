@@ -20,7 +20,10 @@ class AssessmentApiTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->user = User::factory()->create();
+        // This file is specifically about the assessment endpoint, so the
+        // default logged-in user here is an assessor - that's who's
+        // actually meant to call it now.
+        $this->user = User::factory()->assessor()->create();
         Sanctum::actingAs($this->user);
     }
 
@@ -244,16 +247,31 @@ class AssessmentApiTest extends TestCase
         $response->assertStatus(401);
     }
 
-    public function test_any_logged_in_user_can_assess_someone_elses_reflection(): void
+    public function test_an_assessor_can_assess_someone_elses_reflection(): void
     {
         // By design - an assessor is a different person to the student
-        // being assessed, so this should succeed, not 403.
+        // being assessed, so this should succeed, not 403. $this->user
+        // (from setUp) is already an assessor.
         $student = User::factory()->create();
         $reflection = Reflection::factory()->create(['user_id' => $student->id]);
 
         $response = $this->postJson('/api/assessments', ['reflection_id' => $reflection->id, 'score' => 4]);
 
         $response->assertStatus(201);
+    }
+
+    public function test_a_student_cannot_submit_an_assessment(): void
+    {
+        // This was the actual bug: any logged-in account, student or
+        // not, could call this and score someone else's reflection.
+        Sanctum::actingAs(User::factory()->create()); // default role is 'student'
+
+        $reflection = Reflection::factory()->create();
+
+        $response = $this->postJson('/api/assessments', ['reflection_id' => $reflection->id, 'score' => 4]);
+
+        $response->assertStatus(403);
+        $this->assertDatabaseCount('assessments', 0);
     }
 
     public function test_rejects_feedback_longer_than_1000_characters(): void
