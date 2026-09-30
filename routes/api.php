@@ -3,31 +3,36 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/user', function (Request $request) {
-    return $request->user();
-})->middleware('auth:sanctum');
-
+use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ReflectionController;
-
-Route::post('/reflections', [ReflectionController::class, 'store']);
-Route::get('/reflections', [ReflectionController::class, 'index']);
-
 use App\Http\Controllers\AssessmentController;
-
-Route::post('/assessments', [AssessmentController::class, 'store']);
-
-Route::put('/reflections/{id}', [ReflectionController::class, 'update']);
-Route::delete('/reflections/{id}', [ReflectionController::class, 'destroy']);
-
-// Sprint 3 - read endpoints so the radar chart can load real self + assessor scores
-Route::get('/reflections/{id}', [ReflectionController::class, 'show']);
-Route::get('/assessments', [AssessmentController::class, 'index']);
-Route::get('/assessments/{id}', [AssessmentController::class, 'show']);
-
-// Sprint 4 - evidence (files or links) attached to a reflection
 use App\Http\Controllers\EvidenceController;
 
-Route::post('/reflections/{id}/evidence', [EvidenceController::class, 'store']);
-Route::get('/reflections/{id}/evidence', [EvidenceController::class, 'index']);
-Route::get('/evidence/{id}/download', [EvidenceController::class, 'download']);
-Route::delete('/evidence/{id}', [EvidenceController::class, 'destroy']);
+// Public - no account needed yet
+Route::post('/register', [AuthController::class, 'register']);
+Route::post('/login', [AuthController::class, 'login']);
+
+// Sprint 5 - everything below requires a valid Bearer token.
+// Send it as: Authorization: Bearer <token from /login or /register>
+Route::middleware('auth:sanctum')->group(function () {
+
+    Route::get('/user', function (Request $request) {
+        return $request->user();
+    });
+    Route::post('/logout', [AuthController::class, 'logout']);
+
+    Route::post('/reflections', [ReflectionController::class, 'store']);
+    Route::get('/reflections', [ReflectionController::class, 'index']);
+    Route::get('/reflections/{id}', [ReflectionController::class, 'show']);
+    Route::put('/reflections/{id}', [ReflectionController::class, 'update']);
+    Route::delete('/reflections/{id}', [ReflectionController::class, 'destroy']);
+
+    Route::post('/assessments', [AssessmentController::class, 'store']);
+    Route::get('/assessments', [AssessmentController::class, 'index']);
+    Route::get('/assessments/{id}', [AssessmentController::class, 'show']);
+
+    Route::post('/reflections/{id}/evidence', [EvidenceController::class, 'store']);
+    Route::get('/reflections/{id}/evidence', [EvidenceController::class, 'index']);
+    Route::get('/evidence/{id}/download', [EvidenceController::class, 'download']);
+    Route::delete('/evidence/{id}', [EvidenceController::class, 'destroy']);
+});

@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Reflection;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 /**
@@ -14,6 +15,19 @@ use Tests\TestCase;
 class ReflectionApiTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected User $user;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        // Sprint 5 - every route now needs a logged-in user. This logs one
+        // in for every test in this file. $this->user is the one it uses,
+        // so tests that update/delete a reflection can create it owned by
+        // this same user - otherwise the new ownership check fails them.
+        $this->user = User::factory()->create();
+        Sanctum::actingAs($this->user);
+    }
 
     // ---------- Happy path ----------
 
@@ -97,7 +111,7 @@ class ReflectionApiTest extends TestCase
 
     public function test_can_update_competency_scores(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
 
         $response = $this->putJson("/api/reflections/{$reflection->id}", [
             'scores' => $this->validCompetencyScores(),
@@ -219,7 +233,7 @@ class ReflectionApiTest extends TestCase
 
     public function test_can_update_an_existing_reflection(): void
     {
-        $reflection = Reflection::factory()->create(['score' => 2, 'comment' => 'Original comment.']);
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id, 'score' => 2, 'comment' => 'Original comment.']);
 
         $response = $this->putJson("/api/reflections/{$reflection->id}", [
             'score'   => 5,
@@ -239,7 +253,7 @@ class ReflectionApiTest extends TestCase
 
     public function test_can_update_only_the_score(): void
     {
-        $reflection = Reflection::factory()->create(['score' => 1, 'comment' => 'Keep me.']);
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id, 'score' => 1, 'comment' => 'Keep me.']);
 
         $response = $this->putJson("/api/reflections/{$reflection->id}", ['score' => 4]);
 
@@ -260,7 +274,7 @@ class ReflectionApiTest extends TestCase
 
     public function test_update_rejects_score_out_of_range(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
 
         $response = $this->putJson("/api/reflections/{$reflection->id}", ['score' => 6]);
 
@@ -269,7 +283,7 @@ class ReflectionApiTest extends TestCase
 
     public function test_update_rejects_non_integer_score(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
 
         $response = $this->putJson("/api/reflections/{$reflection->id}", ['score' => 'great']);
 
@@ -278,7 +292,7 @@ class ReflectionApiTest extends TestCase
 
     public function test_update_rejects_comment_longer_than_1000_characters(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
 
         $response = $this->putJson("/api/reflections/{$reflection->id}", [
             'comment' => str_repeat('c', 1001),
@@ -291,7 +305,7 @@ class ReflectionApiTest extends TestCase
 
     public function test_can_delete_an_existing_reflection(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
 
         $response = $this->deleteJson("/api/reflections/{$reflection->id}");
 
@@ -307,6 +321,46 @@ class ReflectionApiTest extends TestCase
     }
 
     // ---------- Response performance ----------
+
+    // ---------- Sprint 5: authentication & ownership ----------
+
+    public function test_guest_cannot_create_a_reflection(): void
+    {
+        $this->app['auth']->forgetGuards(); // undo setUp()'s login - simulates a logged-out request
+
+        $response = $this->postJson('/api/reflections', ['score' => 4]);
+
+        $response->assertStatus(401);
+    }
+
+    public function test_guest_cannot_list_reflections(): void
+    {
+        $this->app['auth']->forgetGuards();
+
+        $this->getJson('/api/reflections')->assertStatus(401);
+    }
+
+    public function test_cannot_update_another_students_reflection(): void
+    {
+        $someoneElse = User::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $someoneElse->id]);
+
+        $response = $this->putJson("/api/reflections/{$reflection->id}", ['score' => 5]);
+
+        $response->assertStatus(403);
+        $this->assertDatabaseHas('reflections', ['id' => $reflection->id, 'score' => $reflection->score]);
+    }
+
+    public function test_cannot_delete_another_students_reflection(): void
+    {
+        $someoneElse = User::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $someoneElse->id]);
+
+        $response = $this->deleteJson("/api/reflections/{$reflection->id}");
+
+        $response->assertStatus(403);
+        $this->assertDatabaseHas('reflections', ['id' => $reflection->id]);
+    }
 
     public function test_reflections_index_responds_quickly_with_many_rows(): void
     {

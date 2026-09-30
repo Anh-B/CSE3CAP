@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\Reflection;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 /**
@@ -12,6 +14,15 @@ use Tests\TestCase;
 class AssessmentApiTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected User $user;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->user = User::factory()->create();
+        Sanctum::actingAs($this->user);
+    }
 
     // ---------- Happy path ----------
 
@@ -173,7 +184,7 @@ class AssessmentApiTest extends TestCase
 
     public function test_deleting_a_reflection_also_deletes_its_assessments(): void
     {
-        $reflection = Reflection::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
         $assessment = \App\Models\Assessment::factory()->create(['reflection_id' => $reflection->id]);
 
         $this->deleteJson("/api/reflections/{$reflection->id}")->assertStatus(200);
@@ -219,6 +230,30 @@ class AssessmentApiTest extends TestCase
         ]);
 
         $response->assertStatus(422)->assertJsonValidationErrors(['score']);
+    }
+
+    // ---------- Sprint 5: authentication ----------
+
+    public function test_guest_cannot_submit_an_assessment(): void
+    {
+        $this->app['auth']->forgetGuards();
+        $reflection = Reflection::factory()->create();
+
+        $response = $this->postJson('/api/assessments', ['reflection_id' => $reflection->id, 'score' => 4]);
+
+        $response->assertStatus(401);
+    }
+
+    public function test_any_logged_in_user_can_assess_someone_elses_reflection(): void
+    {
+        // By design - an assessor is a different person to the student
+        // being assessed, so this should succeed, not 403.
+        $student = User::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $student->id]);
+
+        $response = $this->postJson('/api/assessments', ['reflection_id' => $reflection->id, 'score' => 4]);
+
+        $response->assertStatus(201);
     }
 
     public function test_rejects_feedback_longer_than_1000_characters(): void

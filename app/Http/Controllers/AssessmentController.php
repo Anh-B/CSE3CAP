@@ -36,9 +36,11 @@ class AssessmentController extends Controller
         ]);
 
         // Lưu thông tin đánh giá
+        // auth()->id() is always set here - this route sits behind
+        // the auth:sanctum middleware group, so there's no anonymous case.
         $assessment = Assessment::create([
             'reflection_id' => $validated['reflection_id'],
-            'assessor_id'   => auth()->id() ?? null,
+            'assessor_id'   => auth()->id(),
             'score'         => $validated['score'],
             'feedback'      => $validated['feedback'] ?? null,
             'scores'        => $validated['scores'] ?? null,

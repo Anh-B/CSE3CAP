@@ -1,10 +1,46 @@
 # Reflection Diary — API Docs
 
-Andraws Matti · Sprint 3, updated Sprint 4
+Andraws Matti · Sprint 3, updated Sprint 4 and Sprint 5
 
 All routes start with `/api`. Send and expect JSON (`Accept: application/json`).
 
 Every response has a `success` field. If something goes wrong you get `success: false` and a `message`, or for validation problems, a `422` with an `errors` list showing which field was wrong.
+
+## Logging in — new in Sprint 5
+
+Every route below now needs a logged-in user. Before Sprint 5, all of this was wide open to anyone - no login at all, and there was no way to stop one student from editing or deleting someone else's reflection. That's what this sprint fixes.
+
+**Register** — `POST /api/register`
+Send `name`, `email`, `password`, and `password_confirmation` (has to match `password`, min 8 characters). Returns a token straight away with a `201`, so there's no need to log in again right after signing up.
+
+**Log in** — `POST /api/login`
+Send `email` and `password`. Returns a token with a `200`, or a `401` if they don't match.
+
+Both of these return the same shape:
+```json
+{
+  "success": true,
+  "message": "Logged in successfully!",
+  "data": {
+    "user": { "id": 1, "name": "Alice", "email": "alice@example.com" },
+    "token": "1|abcdef123456..."
+  }
+}
+```
+
+**Using the token** — send it on every request after this as a header:
+```
+Authorization: Bearer 1|abcdef123456...
+```
+Without it, every route below now returns `401 Unauthenticated`.
+
+**Log out** — `POST /api/logout`
+Revokes the token that was used on this request. Only signs that one device out - other logged-in devices for the same account keep working.
+
+**Who can do what:**
+- A student can only edit or delete their **own** reflections, and only add or remove evidence on their **own** reflections. Trying to touch someone else's gets a `403`.
+- Assessing is different on purpose - any logged-in user can leave an assessment on **any** reflection, since the assessor is a different person to the student by definition.
+- Reading (list and get-one, for both reflections and assessments) is open to any logged-in user for now. There's no student/assessor role field on accounts yet to tell the two apart, so locking reads down to "your own only" would stop assessors from being able to browse and pick a reflection to score. A proper roles system is its own future ticket.
 
 ## The 6 competencies
 
