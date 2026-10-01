@@ -1,6 +1,6 @@
 # Reflection Diary — API Docs
 
-Andraws Matti · Sprint 3, updated Sprint 4 and Sprint 5
+Andraws Matti · Sprint 3, updated Sprints 4, 5 and 6
 
 All routes start with `/api`. Send and expect JSON (`Accept: application/json`).
 
@@ -12,6 +12,8 @@ Every route below now needs a logged-in user. Before Sprint 5, all of this was w
 
 **Register** — `POST /api/register`
 Send `name`, `email`, `password`, and `password_confirmation` (has to match `password`, min 8 characters). Returns a token straight away with a `201`, so there's no need to log in again right after signing up.
+
+Registering always creates a **student** account. If the request includes a `role`, it's ignored. Otherwise a student could make a second account as an assessor and score their own reflection. The frontend doesn't need a role picker on the sign-up form.
 
 **Log in** — `POST /api/login`
 Send `email` and `password`. Returns a token with a `200`, or a `401` if they don't match.
@@ -39,8 +41,14 @@ Revokes the token that was used on this request. Only signs that one device out 
 
 **Who can do what:**
 - A student can only edit or delete their **own** reflections, and only add or remove evidence on their **own** reflections. Trying to touch someone else's gets a `403`.
-- Assessing is different on purpose - any logged-in user can leave an assessment on **any** reflection, since the assessor is a different person to the student by definition.
-- Reading (list and get-one, for both reflections and assessments) is open to any logged-in user for now. There's no student/assessor role field on accounts yet to tell the two apart, so locking reads down to "your own only" would stop assessors from being able to browse and pick a reflection to score. A proper roles system is its own future ticket.
+- Only **assessor** accounts can submit an assessment (`POST /api/assessments`). A student gets a `403`.
+- Reading (list and get-one, for both reflections and assessments) is open to any logged-in user, since assessors need to browse everyone's reflections to find ones to score.
+
+**Getting an assessor account:** sign-up can't create one. The team creates them from Railway (CSE3CAP service → **Console** tab):
+```
+php artisan assessor:create jane@example.com "Jane Smith"
+```
+It asks for a password. Running it on an email that already exists as a student offers to upgrade that account to assessor instead. For demos, `php artisan db:seed --class=DemoSeeder` also creates `assessor.demo@example.com` (password `password`) - don't run that one on the live site, since that password is public in this repo.
 
 ## The 6 competencies
 
@@ -59,6 +67,8 @@ Send `score` (1–5, required), `comment` (optional, max 1000 characters), and `
 
 **List** — `GET /api/reflections`
 Newest first, 15 per page. Use `?per_page=20&page=2` to change that (max 100 per page). The `meta` part of the response tells you the total and how many pages there are.
+
+Each reflection in the list has an `assessment_status` of either `"assessed"` (an assessor has scored it) or `"pending"` (not scored yet). Add `?status=pending` or `?status=assessed` to only get one kind, e.g. `?status=pending` for an assessor's to-do list. It combines with the paging options.
 
 **Get one** — `GET /api/reflections/{id}` *(new in Sprint 3)*
 Returns the entry plus any assessor feedback on it, under `assessments`, and any evidence attached to it, under `evidence` (added in Sprint 4). This is the one the radar chart should use, since it gives both sets of scores in one go:

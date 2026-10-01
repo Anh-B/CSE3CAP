@@ -24,6 +24,11 @@ class DemoSeederTest extends TestCase
         $this->assertSame(4, Assessment::count());
         $this->assertSame(4, \App\Models\Evidence::count());
 
+        // The demo assessor has to actually be an assessor, or it can't
+        // score anything now that scoring is restricted to assessors.
+        $this->assertSame('assessor', \App\Models\User::where('email', 'assessor.demo@example.com')->value('role'));
+        $this->assertSame(1, \App\Models\User::where('role', 'assessor')->count());
+
         $keys = ['contribution', 'communication', 'collaboration', 'agile', 'continuous', 'leadership'];
 
         foreach (Reflection::all()->concat(Assessment::all()) as $row) {

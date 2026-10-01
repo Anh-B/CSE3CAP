@@ -35,31 +35,43 @@ class AuthApiTest extends TestCase
         $this->assertDatabaseHas('users', ['email' => 'alice@example.com', 'role' => 'student']);
     }
 
-    public function test_can_register_as_an_assessor(): void
+    public function test_cannot_register_as_an_assessor(): void
     {
+        // The loophole this closes: a student making a second account as
+        // an assessor and scoring their own reflection. Any role sent is
+        // ignored, and the account is always a student.
         $response = $this->postJson('/api/register', [
-            'name' => 'Assessor Bob',
-            'email' => 'bob@example.com',
+            'name' => 'Sneaky Student',
+            'email' => 'sneaky@example.com',
             'password' => 'password123',
             'password_confirmation' => 'password123',
             'role' => 'assessor',
         ]);
 
-        $response->assertStatus(201)->assertJsonPath('data.user.role', 'assessor');
-        $this->assertDatabaseHas('users', ['email' => 'bob@example.com', 'role' => 'assessor']);
+        $response->assertStatus(201)->assertJsonPath('data.user.role', 'student');
+        $this->assertDatabaseHas('users', ['email' => 'sneaky@example.com', 'role' => 'student']);
+        $this->assertDatabaseMissing('users', ['role' => 'assessor']);
     }
 
-    public function test_rejects_an_invalid_role(): void
+    public function test_a_self_registered_account_cannot_submit_an_assessment(): void
     {
-        $response = $this->postJson('/api/register', [
-            'name' => 'Carl',
-            'email' => 'carl@example.com',
+        // End-to-end version of the loophole: register while asking for
+        // assessor, then try to use that account to score a reflection.
+        $token = $this->postJson('/api/register', [
+            'name' => 'Sneaky Student',
+            'email' => 'sneaky@example.com',
             'password' => 'password123',
             'password_confirmation' => 'password123',
-            'role' => 'admin', // not a real role
-        ]);
+            'role' => 'assessor',
+        ])->json('data.token');
 
-        $response->assertStatus(422)->assertJsonValidationErrors(['role']);
+        $reflection = \App\Models\Reflection::factory()->create();
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson('/api/assessments', ['reflection_id' => $reflection->id, 'score' => 5]);
+
+        $response->assertStatus(403);
+        $this->assertDatabaseCount('assessments', 0);
     }
 
     public function test_rejects_a_duplicate_email(): void
