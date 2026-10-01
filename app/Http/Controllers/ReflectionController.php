@@ -50,34 +50,55 @@ class ReflectionController extends Controller
     }
 
     public function index(Request $request)
-{
-    // Scope note: this intentionally returns every student's reflections
-    // to any logged-in user, not just their own. Assessors need to browse
-    // and pick a reflection to score, and there's no student/assessor role
-    // field on the users table yet to tell the two apart. Locking this to
-    // "your own reflections only" would break assessing. A proper roles
-    // system is its own ticket - for now, requiring login (this ticket's
-    // actual goal) is the fix; who can read what is a follow-up.
-    //
-    // Paginate instead of loading the entire table at once,
-    // keeping the response fast and stable as the number of
-    // reflections grows. Clients can pass ?per_page=20&page=2.
-    $perPage = (int) $request->query('per_page', 15);
-    $perPage = min(max($perPage, 1), 100); // clamp to 1-100
+    {
+        // Any logged-in user can list reflections, since assessors need to
+        // browse everyone's to find ones to score.
+        //
+        // Paginated so the response stays fast as the table grows.
+        // Clients can pass ?per_page=20&page=2.
+        //
+        // Each item includes assessment_status ('assessed' or 'pending'),
+        // and ?status=pending or ?status=assessed filters the list, so the
+        // frontend can show which reflections still need scoring.
+        $request->validate([
+            'status' => 'nullable|in:pending,assessed',
+        ], [
+            'status.in' => 'Status must be either pending or assessed.',
+        ]);
 
-    $reflections = Reflection::latest()->paginate($perPage);
+        $perPage = (int) $request->query('per_page', 15);
+        $perPage = min(max($perPage, 1), 100); // clamp to 1-100
 
-    return response()->json([
-        'success' => true,
-        'data'    => $reflections->items(),
-        'meta'    => [
-            'current_page' => $reflections->currentPage(),
-            'per_page'     => $reflections->perPage(),
-            'total'        => $reflections->total(),
-            'last_page'    => $reflections->lastPage(),
-        ],
-    ]);
-}
+        $query = Reflection::latest()->withExists('assessments');
+
+        if ($request->query('status') === 'pending') {
+            $query->whereDoesntHave('assessments');
+        } elseif ($request->query('status') === 'assessed') {
+            $query->whereHas('assessments');
+        }
+
+        $reflections = $query->paginate($perPage);
+
+        // withExists() adds an 'assessments_exists' true/false to each row;
+        // turn that into a clearer label for the frontend.
+        $items = collect($reflections->items())->map(function ($reflection) {
+            $data = $reflection->toArray();
+            $data['assessment_status'] = $reflection->assessments_exists ? 'assessed' : 'pending';
+            unset($data['assessments_exists']);
+            return $data;
+        });
+
+        return response()->json([
+            'success' => true,
+            'data'    => $items,
+            'meta'    => [
+                'current_page' => $reflections->currentPage(),
+                'per_page'     => $reflections->perPage(),
+                'total'        => $reflections->total(),
+                'last_page'    => $reflections->lastPage(),
+            ],
+        ]);
+    }
 
     /**
      * Show a single reflection entry, with any assessor feedback and

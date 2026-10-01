@@ -30,7 +30,7 @@ class DemoSeeder extends Seeder
             'sam'   => User::factory()->create(['name' => 'Demo Student - Sam',   'email' => 'sam.demo@example.com']),
         ];
 
-        $assessor = User::factory()->create(['name' => 'Demo Assessor', 'email' => 'assessor.demo@example.com']);
+        $assessor = User::factory()->assessor()->create(['name' => 'Demo Assessor', 'email' => 'assessor.demo@example.com']);
 
         // [student, overall score, comment, self scores, assessor feedback or null]
         $entries = [
