@@ -284,6 +284,53 @@
                 });
                 return parseJsonResponse(res, "saveAssessorScores");
             },
+            async uploadEvidence(reflectionId, file, description = "") {
+                const formData = new FormData();
+                formData.append("file", file);
+                if (description) formData.append("description", description);
+
+                const headers = {};
+                if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+
+                const res = await fetch(`${API_BASE_URL}/reflections/${reflectionId}/evidence`, {
+                    method: "POST",
+                    headers,
+                    body: formData,
+                });
+                return parseJsonResponse(res, "uploadEvidence");
+            },
+            async getEvidence(reflectionId) {
+                const res = await fetch(`${API_BASE_URL}/reflections/${reflectionId}/evidence`, {
+                    headers: authHeaders(),
+                });
+                return parseJsonResponse(res, "getEvidence");
+            },
+            // Deletes one evidence item from the server.
+            // Matches EvidenceController@destroy: DELETE /api/evidence/{id}.
+            async deleteEvidence(evidenceId) {
+                const res = await fetch(`${API_BASE_URL}/evidence/${evidenceId}`, {
+                    method: "DELETE",
+                    headers: authHeaders(),
+                });
+                return parseJsonResponse(res, "deleteEvidence");
+            },
+            async downloadEvidence(evidenceId, filename) {
+                const headers = {};
+                if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+
+                const res = await fetch(`${API_BASE_URL}/evidence/${evidenceId}/download`, { headers });
+                if (!res.ok) throw new Error("Could not download the file.");
+
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+            },
         };
 
         const tabs = [
@@ -622,35 +669,37 @@
                 const files = Array.from(e.target.files || []);
                 if (files.length === 0) return;
 
-                files.forEach((file) => {
-                    const reader = new FileReader();
-                    reader.onload = (uploadEvent) => {
-                        const newAttachment = {
-                            id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-                            name: file.name,
-                            size: file.size,
-                            type: file.type.includes("pdf") ? "pdf" : "txt",
-                            dataUrl: uploadEvent.target.result,
-                        };
+                const newAttachment = files.map((file) => ({
+                    id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+                    name: file.name,
+                    size: file.size,
+                    type: file.type.includes("pdf") ? "pdf" : "txt",
+                    file,
+                    uploaded: false,
+                }));
 
-                        setEntryForms((forms) =>
-                            forms.map((form) =>
-                                form.formId === formId
-                                    ? {
-                                          ...form,
-                                          attachments: [...(form.attachments || []), newAttachment],
+                setEntryForms((forms) =>
+                    forms.map((form) =>
+                        form.formId === formId
+                            ? {
+                              ...form,attachments: [...(form.attachments || []), ...newAttachment],
                                       }
-                                    : form
-                            )
-                        );
-                    };
-                    reader.readAsDataURL(file);
-                });
+                            : form
+                    )
+                );
 
                 e.target.value = "";
             };
 
             const removeAttachment = (formId, attachmentId) => {
+                const form = entryForms.find((item) => item.formId === formId);
+                const attachment = form?.attachments?.find((att) => att.id == attachmentId);
+
+                if (attachment?.evidenceId) {
+                    api.deleteEvidence(attachment.evidenceId).catch((error) => {
+                        alert(`Could not delete evidence from the server: ${error.message}`);
+                    });
+                }
                 setEntryForms((forms) =>
                     forms.map((form) =>
                         form.formId === formId
@@ -658,7 +707,7 @@
                                   ...form,
                                   attachments: (form.attachments || []).filter(
                                       (att) => att.id !== attachmentId
-                                  ),
+                                  )
                               }
                             : form
                     )
@@ -723,19 +772,49 @@
                 // first time, PUT updates it after that) and remember its
                 // id so the assessor's scores can be linked to it later.
                 api.saveReflectionEntry(savedEntry, currentReflectionId)
-                    .then((res) => {
+                    .then(async (res) => {
                         const id = res?.data?.id;
-                        if (id) {
-                            setCurrentReflectionId(id);
-                            try {
-                                localStorage.setItem("alumableCurrentReflectionId", id);
-                            } catch (error) {}
-                        }
-                    })
-                    .catch((error) => {
-                        setFormStatus(formId, `Saved locally, but the server rejected it: ${error.message}`);
-                    });
+                        if (!id) return;
+                        
+                        setCurrentReflectionId(id);
+                        try {
+                            localStorage.setItem("alumableCurrentReflectionId", id);
+                        } catch (error) {}
 
+                    const currentForm = entryForms.find((item) => item.formId === formId);
+                    const pending = (currentForm?.attachments || []).filter((att) => att.file && !att.uploaded);
+
+                    for (const attachment of pending) {
+                        try {
+                            const evidenceRes = await api.uploadEvidence(id, attachment.file, currentForm.gigTitle);
+                            const evidence = evidenceRes?.data;
+                            setEntryForms((forms) =>
+                                forms.map((form) =>
+                                    form.formId === formId
+                                        ? {
+                                            ...form,
+                                            attachments: form.attachments.map((att) =>
+                                                att.id === attachment.id
+                                                    ? {
+                                                        ...att,
+                                                        uploaded: true,
+                                                        evidenceId: evidence?.id,
+                                                        file: null,
+                                                        }
+                                                    : att
+                                            ),
+                                        }
+                                    :form
+                                )
+                            );
+                        }  catch (error) {
+                                setFormStatus(formId, `Entry saved, but "${attachment.name}" failed to upload: ${error.message}`);
+                        }          
+                    }
+                })
+                .catch((error) => {
+                    setFormStatus(formId, `Saved locally, but the server rejected it: ${error.message}`);
+                });
                 setEntryForms((forms) =>
                     forms.map((item) =>
                         item.formId === formId
@@ -1348,14 +1427,22 @@
                                                                     }}
                                                                 >
                                                                     <FileText size={13} style={{ color: tokens.brassDark }} />
-                                                                    <a
-                                                                        href={att.dataUrl}
-                                                                        download={att.name}
-                                                                        className="font-medium hover:underline max-w-[180px] truncate"
-                                                                        title="Click to download/preview"
+                                                                    <button
+                                                                        type='button'
+                                                                        onClick={() => {
+                                                                            if (att.evidenceId) {
+                                                                                api.downloadEvidence(att.evidenceId, att.name)
+                                                                                    .catch((error) => alert(error.message));
+                                                                            } else {
+                                                                                alert("This file hasn't finished uploading yet - save the entry first.");
+                                                
+                                                                            }
+                                                                        }}
+                                                                        className="font-medium hover:underline max-w-[180px] truncate text-left"
+                                                                        title={att.uploaded ? "Click to download" : "Uploading..."}
                                                                     >
-                                                                        {att.name}
-                                                                    </a>
+                                                                        {att.name}{!att.uploaded ? " (uploading...)" : ""}
+                                                                    </button>
                                                                     <span style={{ color: tokens.inkSoft }}>
                                                                         ({formatFileSize(att.size)})
                                                                     </span>
