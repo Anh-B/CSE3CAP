@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\Reflection;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 /**
@@ -12,6 +14,18 @@ use Tests\TestCase;
 class AssessmentApiTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected User $user;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        // This file is specifically about the assessment endpoint, so the
+        // default logged-in user here is an assessor - that's who's
+        // actually meant to call it now.
+        $this->user = User::factory()->assessor()->create();
+        Sanctum::actingAs($this->user);
+    }
 
     // ---------- Happy path ----------
 
@@ -45,6 +59,140 @@ class AssessmentApiTest extends TestCase
         ]);
 
         $response->assertStatus(201);
+    }
+
+    // ---------- Per-competency counter-scores (radar chart) ----------
+
+    private function validCompetencyScores(): array
+    {
+        return [
+            'contribution'  => 4,
+            'communication' => 3,
+            'collaboration' => 4,
+            'agile'         => 5,
+            'continuous'    => 3,
+            'leadership'    => 4,
+        ];
+    }
+
+    public function test_can_submit_an_assessment_with_competency_scores(): void
+    {
+        $reflection = Reflection::factory()->create();
+
+        $response = $this->postJson('/api/assessments', [
+            'reflection_id' => $reflection->id,
+            'score'         => 4,
+            'feedback'      => 'Sprint 4 assessor review.',
+            'scores'        => $this->validCompetencyScores(),
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJson(['success' => true]);
+
+        $assessment = \App\Models\Assessment::latest()->first();
+        $this->assertEquals($this->validCompetencyScores(), $assessment->scores);
+    }
+
+    public function test_assessment_competency_scores_are_optional(): void
+    {
+        $reflection = Reflection::factory()->create();
+
+        $response = $this->postJson('/api/assessments', [
+            'reflection_id' => $reflection->id,
+            'score'         => 3,
+        ]);
+
+        $response->assertStatus(201);
+        $this->assertNull(\App\Models\Assessment::latest()->first()->scores);
+    }
+
+    public function test_rejects_assessment_competency_scores_missing_a_competency(): void
+    {
+        $reflection = Reflection::factory()->create();
+        $scores = $this->validCompetencyScores();
+        unset($scores['leadership']);
+
+        $response = $this->postJson('/api/assessments', [
+            'reflection_id' => $reflection->id,
+            'score'         => 4,
+            'scores'        => $scores,
+        ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors(['scores.leadership']);
+    }
+
+    public function test_rejects_assessment_competency_score_out_of_range(): void
+    {
+        $reflection = Reflection::factory()->create();
+        $scores = $this->validCompetencyScores();
+        $scores['agile'] = 9;
+
+        $response = $this->postJson('/api/assessments', [
+            'reflection_id' => $reflection->id,
+            'score'         => 4,
+            'scores'        => $scores,
+        ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors(['scores.agile']);
+    }
+
+    // ---------- index() / show() ----------
+
+    public function test_can_list_assessments(): void
+    {
+        \App\Models\Assessment::factory()->count(3)->create();
+
+        $response = $this->getJson('/api/assessments');
+
+        $response->assertStatus(200)
+            ->assertJson(['success' => true])
+            ->assertJsonCount(3, 'data')
+            ->assertJsonPath('meta.total', 3);
+    }
+
+    public function test_can_filter_assessments_by_reflection(): void
+    {
+        $reflection = Reflection::factory()->create();
+        \App\Models\Assessment::factory()->count(2)->create(['reflection_id' => $reflection->id]);
+        \App\Models\Assessment::factory()->create(); // belongs to a different reflection
+
+        $response = $this->getJson("/api/assessments?reflection_id={$reflection->id}");
+
+        $response->assertStatus(200)->assertJsonCount(2, 'data');
+        $this->assertTrue(
+            collect($response->json('data'))->every(fn ($a) => $a['reflection_id'] === $reflection->id)
+        );
+    }
+
+    public function test_can_show_a_single_assessment_with_its_scores(): void
+    {
+        $assessment = \App\Models\Assessment::factory()->create([
+            'scores' => $this->validCompetencyScores(),
+        ]);
+
+        $response = $this->getJson("/api/assessments/{$assessment->id}");
+
+        $response->assertStatus(200)
+            ->assertJson(['success' => true])
+            ->assertJsonPath('data.id', $assessment->id)
+            ->assertJsonPath('data.scores.leadership', 4);
+    }
+
+    public function test_show_returns_404_for_a_nonexistent_assessment(): void
+    {
+        $response = $this->getJson('/api/assessments/99999');
+
+        $response->assertStatus(404)->assertJson(['success' => false]);
+    }
+
+    public function test_deleting_a_reflection_also_deletes_its_assessments(): void
+    {
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
+        $assessment = \App\Models\Assessment::factory()->create(['reflection_id' => $reflection->id]);
+
+        $this->deleteJson("/api/reflections/{$reflection->id}")->assertStatus(200);
+
+        $this->assertDatabaseMissing('assessments', ['id' => $assessment->id]);
     }
 
     // ---------- Error handling ----------
@@ -85,6 +233,45 @@ class AssessmentApiTest extends TestCase
         ]);
 
         $response->assertStatus(422)->assertJsonValidationErrors(['score']);
+    }
+
+    // ---------- Sprint 5: authentication ----------
+
+    public function test_guest_cannot_submit_an_assessment(): void
+    {
+        $this->app['auth']->forgetGuards();
+        $reflection = Reflection::factory()->create();
+
+        $response = $this->postJson('/api/assessments', ['reflection_id' => $reflection->id, 'score' => 4]);
+
+        $response->assertStatus(401);
+    }
+
+    public function test_an_assessor_can_assess_someone_elses_reflection(): void
+    {
+        // By design - an assessor is a different person to the student
+        // being assessed, so this should succeed, not 403. $this->user
+        // (from setUp) is already an assessor.
+        $student = User::factory()->create();
+        $reflection = Reflection::factory()->create(['user_id' => $student->id]);
+
+        $response = $this->postJson('/api/assessments', ['reflection_id' => $reflection->id, 'score' => 4]);
+
+        $response->assertStatus(201);
+    }
+
+    public function test_a_student_cannot_submit_an_assessment(): void
+    {
+        // This was the actual bug: any logged-in account, student or
+        // not, could call this and score someone else's reflection.
+        Sanctum::actingAs(User::factory()->create()); // default role is 'student'
+
+        $reflection = Reflection::factory()->create();
+
+        $response = $this->postJson('/api/assessments', ['reflection_id' => $reflection->id, 'score' => 4]);
+
+        $response->assertStatus(403);
+        $this->assertDatabaseCount('assessments', 0);
     }
 
     public function test_rejects_feedback_longer_than_1000_characters(): void
