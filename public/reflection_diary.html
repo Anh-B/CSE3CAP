@@ -480,6 +480,9 @@
             const [assessorScores, setAssessorScores] = useState(assessorDefaultScores);
             const [savedSelfScores, setSavedSelfScores] = useState(blankScores());
             const [savedAssessorScores, setSavedAssessorScores] = useState(assessorDefaultScores);
+            // "pending" until an assessor has scored this reflection, then
+            // "assessed". Comes from the backend's assessment_status field.
+            const [assessmentStatus, setAssessmentStatus] = useState(null);
 
             // The backend reflection record that the self-assessment scores
             // (and, in turn, the assessor scores) are saved against. Kept in
@@ -617,6 +620,8 @@
                     .then((res) => {
                         const data = res?.data;
                         if (!data) return;
+
+                        setAssessmentStatus(data.assessment_status || null);
 
                         if (data.scores) {
                             setScores({ ...blankScores(), ...data.scores });
@@ -777,6 +782,7 @@
                         if (!id) return;
                         
                         setCurrentReflectionId(id);
+                        setAssessmentStatus((status) => status || "pending");
                         try {
                             localStorage.setItem("alumableCurrentReflectionId", id);
                         } catch (error) {}
@@ -902,6 +908,7 @@
                         const id = res?.data?.id;
                         if (id) {
                             setCurrentReflectionId(id);
+                            setAssessmentStatus((status) => status || "pending");
                             try {
                                 localStorage.setItem("alumableCurrentReflectionId", id);
                             } catch (error) {}
@@ -918,9 +925,11 @@
                 setSavedAssessorScores({ ...assessorScores });
                 setAssessorSaveStatus("saved");
 
-                api.saveAssessorScores(assessorScores, currentReflectionId).catch((error) => {
-                    setAssessorSaveStatus(`error: ${error.message}`);
-                });
+                api.saveAssessorScores(assessorScores, currentReflectionId)
+                    .then(() => setAssessmentStatus("assessed"))
+                    .catch((error) => {
+                        setAssessorSaveStatus(`error: ${error.message}`);
+                    });
 
                 setTimeout(() => setAssessorSaveStatus(null), 3000);
             };
@@ -1179,8 +1188,9 @@
                                         className="w-full rounded-md px-3 py-1.5 text-sm outline-none"
                                         style={{ backgroundColor: "#1C2430", color: "#F8F4E9", border: "1px solid rgba(255,255,255,0.15)" }}
                                     >
+                                        {/* Sign-up only creates students. Assessor accounts are
+                                            provided by the team (php artisan assessor:create). */}
                                         <option value="student">student</option>
-                                        <option value="assessor">assessor</option>
                                     </select>
                                 </div>
                                 <button
@@ -1821,7 +1831,19 @@
                                     style={{ backgroundColor: tokens.sagePanel, border: `1px solid ${tokens.sage}`, boxShadow: "0 4px 16px rgba(63,90,69,0.08)" }}
                                 >
                                     <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
-                                        <SectionEyebrow no="03" label="Supervisor / Assessor Feedback" accent={tokens.sage} accentDark={tokens.sageDark} />
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <SectionEyebrow no="03" label="Supervisor / Assessor Feedback" accent={tokens.sage} accentDark={tokens.sageDark} />
+                                            {assessmentStatus && (
+                                                <span
+                                                    className="text-xs font-medium px-2.5 py-1 rounded-full"
+                                                    style={assessmentStatus === "assessed"
+                                                        ? { backgroundColor: tokens.sage, color: tokens.parchmentWarm }
+                                                        : { backgroundColor: tokens.brassTint, color: tokens.brassDark, border: `1px solid ${tokens.brass}` }}
+                                                >
+                                                    {assessmentStatus === "assessed" ? "Assessed" : "Pending assessment"}
+                                                </span>
+                                            )}
+                                        </div>
                                         <button
                                             onClick={() => setIsAssessorReadOnly(!isAssessorReadOnly)}
                                             className="no-print flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full transition hover:bg-black/5"

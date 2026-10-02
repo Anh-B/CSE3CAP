@@ -370,6 +370,25 @@ class ReflectionApiTest extends TestCase
             ->assertJsonValidationErrors(['status']);
     }
 
+    public function test_single_reflection_says_pending_before_it_is_assessed(): void
+    {
+        $reflection = Reflection::factory()->create();
+
+        $this->getJson("/api/reflections/{$reflection->id}")
+            ->assertStatus(200)
+            ->assertJsonPath('data.assessment_status', 'pending');
+    }
+
+    public function test_single_reflection_says_assessed_once_it_has_a_score(): void
+    {
+        $reflection = Reflection::factory()->create();
+        \App\Models\Assessment::factory()->create(['reflection_id' => $reflection->id]);
+
+        $this->getJson("/api/reflections/{$reflection->id}")
+            ->assertStatus(200)
+            ->assertJsonPath('data.assessment_status', 'assessed');
+    }
+
     // ---------- Sprint 5: authentication & ownership ----------
 
     public function test_guest_cannot_create_a_reflection(): void
