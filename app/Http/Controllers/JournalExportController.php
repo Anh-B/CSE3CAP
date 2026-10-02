@@ -10,8 +10,9 @@ class JournalExportController extends Controller
     public function export()
     {
         try {
-            $reflections = Reflection::latest()->get();
-
+            $reflections = Reflection::where('user_id', auth()->id())
+             ->latest() 
+             ->get(); 
             $pdf = Pdf::loadView('journal.export', [
                 'reflections' => $reflections
             ]);
