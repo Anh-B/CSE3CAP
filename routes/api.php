@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\JournalExportController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -14,6 +15,7 @@ Route::post('/login', [AuthController::class, 'login']);
 
 // Sprint 5 - everything below requires a valid Bearer token.
 // Send it as: Authorization: Bearer <token from /login or /register>
+
 Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/user', function (Request $request) {
@@ -26,6 +28,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reflections/{id}', [ReflectionController::class, 'show']);
     Route::put('/reflections/{id}', [ReflectionController::class, 'update']);
     Route::delete('/reflections/{id}', [ReflectionController::class, 'destroy']);
+    
+  Route::get('/journal/export', [
+    JournalExportController::class,
+    'export'
+]);
 
     Route::post('/assessments', [AssessmentController::class, 'store']);
     Route::get('/assessments', [AssessmentController::class, 'index']);
@@ -36,3 +43,4 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/evidence/{id}/download', [EvidenceController::class, 'download']);
     Route::delete('/evidence/{id}', [EvidenceController::class, 'destroy']);
 });
+
