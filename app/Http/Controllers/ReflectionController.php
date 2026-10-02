@@ -119,10 +119,15 @@ class ReflectionController extends Controller
             ], 404);
         }
 
-        // 3. Return the entry
+        // 3. Return the entry. assessment_status matches the list
+        // endpoint: 'assessed' once an assessor has scored it, otherwise
+        // 'pending', so the page can show which state it's in.
+        $data = $reflection->toArray();
+        $data['assessment_status'] = $reflection->assessments->isNotEmpty() ? 'assessed' : 'pending';
+
         return response()->json([
             'success' => true,
-            'data'    => $reflection
+            'data'    => $data
         ], 200);
     }
 
