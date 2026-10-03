@@ -2014,7 +2014,7 @@
 
                                         <div className="flex flex-col gap-3">
                                             {pendingReflections.map((r) => {
-                                                const hasAssessment = Array.isArray(r.assessments) && r.assessments.length > 0;
+                                                const hasAssessment = r.assessment_status === "assessed";
                                                 const studentLabel = r.user?.name || r.user?.email || r.user_id || "Unknown student";
                                                 return (
                                                     <div
