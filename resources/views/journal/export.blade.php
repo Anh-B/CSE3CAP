@@ -46,7 +46,11 @@
 
     <div class="entry">
 
-        <h2>Reflection #{{ $reflection->id }}</h2>
+        <h2>{{ $reflection->gig_title ?: 'Reflection #' . $reflection->id }}</h2>
+
+        @if ($reflection->category)
+            <p class="date">Category: {{ $reflection->category }}</p>
+        @endif
 
         <p>
             <strong>Overall Score:</strong>

@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 class Reflection extends Model
 {
     use HasFactory;
-    protected $fillable = ['user_id', 'score', 'comment', 'scores'];
+    protected $fillable = ['user_id', 'gig_title', 'category', 'score', 'comment', 'scores'];
 
     protected $casts = [
         'scores' => 'array',
@@ -21,6 +21,12 @@ class Reflection extends Model
         static::deleting(function (Reflection $reflection) {
             $reflection->evidence()->get()->each->delete();
         });
+    }
+
+    // The student who wrote this reflection
+    public function user()
+    {
+        return $this->belongsTo(User::class);
     }
 
     // Assessor feedback left on this reflection (assessments.reflection_id)

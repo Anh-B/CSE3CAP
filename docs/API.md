@@ -42,7 +42,7 @@ Revokes the token that was used on this request. Only signs that one device out 
 **Who can do what:**
 - A student can only edit or delete their **own** reflections, and only add or remove evidence on their **own** reflections. Trying to touch someone else's gets a `403`.
 - Only **assessor** accounts can submit an assessment (`POST /api/assessments`). A student gets a `403`.
-- Reading (list and get-one, for both reflections and assessments) is open to any logged-in user, since assessors need to browse everyone's reflections to find ones to score.
+- A student can only **read** their own reflections and the evidence on them (list, get-one, evidence list and download return only their own; someone else's gets a `403`). **Assessors** can read everyone's, since they need to browse them to find ones to score. Add `?mine=1` to the list to get only your own, even as an assessor.
 
 **Getting an assessor account:** sign-up can't create one. The team creates them from Railway (CSE3CAP service → **Console** tab):
 ```
@@ -63,7 +63,7 @@ These go in a `scores` object. It's optional — if you send `scores`, all 6 key
 ## Reflections (the student's side)
 
 **Create** — `POST /api/reflections`
-Send `score` (1–5, required), `comment` (optional, max 1000 characters), and `scores` (optional). Returns the saved entry with a `201`.
+Send `score` (1–5, required), `comment` (optional, max 5000 characters), `gig_title` (optional, max 255), `category` (optional, max 100) and `scores` (optional). The title and category let the journal's entry list be rebuilt from the server in any browser. Returns the saved entry with a `201`.
 
 **List** — `GET /api/reflections`
 Newest first, 15 per page. Use `?per_page=20&page=2` to change that (max 100 per page). The `meta` part of the response tells you the total and how many pages there are.

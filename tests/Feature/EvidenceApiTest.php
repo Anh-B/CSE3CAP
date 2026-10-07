@@ -299,4 +299,40 @@ class EvidenceApiTest extends TestCase
         $response->assertStatus(403);
         $this->assertDatabaseHas('evidence', ['id' => $evidence->id]);
     }
+
+    // ---------- Who can see evidence ----------
+
+    public function test_cannot_list_evidence_on_another_students_reflection(): void
+    {
+        $reflection = Reflection::factory()->create();
+
+        $this->getJson("/api/reflections/{$reflection->id}/evidence")
+            ->assertStatus(403)->assertJson(['success' => false]);
+    }
+
+    public function test_cannot_download_evidence_from_another_students_reflection(): void
+    {
+        $reflection = Reflection::factory()->create();
+        Storage::put('evidence/secret.txt', 'private notes');
+        $evidence = Evidence::create([
+            'reflection_id' => $reflection->id, 'type' => 'file', 'file_path' => 'evidence/secret.txt',
+            'original_name' => 'secret.txt', 'mime_type' => 'text/plain', 'size' => 13,
+        ]);
+
+        $this->get("/api/evidence/{$evidence->id}/download")->assertStatus(403);
+    }
+
+    public function test_an_assessor_can_list_and_download_a_students_evidence(): void
+    {
+        $reflection = Reflection::factory()->create();
+        Storage::put('evidence/notes.txt', 'sprint notes');
+        $evidence = Evidence::create([
+            'reflection_id' => $reflection->id, 'type' => 'file', 'file_path' => 'evidence/notes.txt',
+            'original_name' => 'notes.txt', 'mime_type' => 'text/plain', 'size' => 12,
+        ]);
+        Sanctum::actingAs(User::factory()->assessor()->create());
+
+        $this->getJson("/api/reflections/{$reflection->id}/evidence")->assertStatus(200)->assertJsonCount(1, 'data');
+        $this->get("/api/evidence/{$evidence->id}/download")->assertStatus(200)->assertDownload('notes.txt');
+    }
 }

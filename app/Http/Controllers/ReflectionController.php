@@ -12,7 +12,11 @@ class ReflectionController extends Controller
         // 1. Validate request data
         $validated = $request->validate([
             'score'                 => 'required|integer|min:1|max:5',
-            'comment'               => 'nullable|string|max:1000',
+            'comment'               => 'nullable|string|max:5000',
+            // Title and category of the journal entry, so the entry list can
+            // be rebuilt from the server on any device.
+            'gig_title'             => 'nullable|string|max:255',
+            'category'              => 'nullable|string|max:100',
             // Optional per-competency scores that feed the radar chart.
             // Kept separate from the overall `score` above so existing
             // clients that only send `score` keep working unchanged.
@@ -28,17 +32,19 @@ class ReflectionController extends Controller
             'score.integer'  => 'The score must be an integer.',
             'score.min'      => 'The self-review score must be at least 1.',
             'score.max'      => 'The self-review score may not be greater than 5.',
-            'comment.max'    => 'The comment may not be greater than 1000 characters.',
+            'comment.max'    => 'The comment may not be greater than 5000 characters.',
         ]);
 
         // 2. Save the reflection entry to the database
         // auth()->id() is always set here - this route sits behind
         // the auth:sanctum middleware group, so there's no anonymous case.
         $reflection = Reflection::create([
-            'user_id' => auth()->id(),
-            'score'   => $validated['score'],
-            'comment' => $validated['comment'] ?? null,
-            'scores'  => $validated['scores'] ?? null,
+            'user_id'   => auth()->id(),
+            'gig_title' => $validated['gig_title'] ?? null,
+            'category'  => $validated['category'] ?? null,
+            'score'     => $validated['score'],
+            'comment'   => $validated['comment'] ?? null,
+            'scores'    => $validated['scores'] ?? null,
         ]);
 
         // 3. Return success response
@@ -49,10 +55,23 @@ class ReflectionController extends Controller
         ], 201);
     }
 
+    /**
+     * The owner of a reflection can view it, and so can any assessor.
+     */
+    private function canView(Reflection $reflection): bool
+    {
+        $user = auth()->user();
+
+        return $user->role === 'assessor'
+            || (int) $reflection->user_id === (int) $user->id;
+    }
+
     public function index(Request $request)
     {
-        // Any logged-in user can list reflections, since assessors need to
-        // browse everyone's to find ones to score.
+        // Students only ever see their own reflections. Assessors see
+        // everyone's, since they need to browse them to find ones to score.
+        // Add ?mine=1 to get only your own (the journal page uses this so
+        // an assessor's own list is not filled with other people's entries).
         //
         // Paginated so the response stays fast as the table grows.
         // Clients can pass ?per_page=20&page=2.
@@ -69,7 +88,12 @@ class ReflectionController extends Controller
         $perPage = (int) $request->query('per_page', 15);
         $perPage = min(max($perPage, 1), 100); // clamp to 1-100
 
-        $query = Reflection::latest()->withExists('assessments');
+        $query = Reflection::latest()->with(['evidence', 'user:id,name,email'])->withExists('assessments');
+
+        $user = $request->user();
+        if ($user->role !== 'assessor' || $request->boolean('mine')) {
+            $query->where('user_id', $user->id);
+        }
 
         if ($request->query('status') === 'pending') {
             $query->whereDoesntHave('assessments');
@@ -119,7 +143,15 @@ class ReflectionController extends Controller
             ], 404);
         }
 
-        // 3. Return the entry. assessment_status matches the list
+        // 3. Students can only open their own entries; assessors can open any
+        if (!$this->canView($reflection)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You can only view your own reflections.'
+            ], 403);
+        }
+
+        // 4. Return the entry. assessment_status matches the list
         // endpoint: 'assessed' once an assessor has scored it, otherwise
         // 'pending', so the page can show which state it's in.
         $data = $reflection->toArray();
@@ -158,7 +190,9 @@ class ReflectionController extends Controller
         // 4. Validate input data
         $validated = $request->validate([
             'score'                 => 'sometimes|required|integer|min:1|max:5',
-            'comment'               => 'nullable|string|max:1000',
+            'comment'               => 'nullable|string|max:5000',
+            'gig_title'             => 'nullable|string|max:255',
+            'category'              => 'nullable|string|max:100',
             'scores'                    => 'nullable|array',
             'scores.contribution'      => 'required_with:scores|integer|min:1|max:5',
             'scores.communication'     => 'required_with:scores|integer|min:1|max:5',
@@ -170,7 +204,7 @@ class ReflectionController extends Controller
             'score.integer' => 'The score must be an integer.',
             'score.min'     => 'The self-review score must be at least 1.',
             'score.max'     => 'The self-review score may not be greater than 5.',
-            'comment.max'   => 'The comment may not exceed 1000 characters.'
+            'comment.max'   => 'The comment may not exceed 5000 characters.'
         ]);
 
         // 5. Update the database record
