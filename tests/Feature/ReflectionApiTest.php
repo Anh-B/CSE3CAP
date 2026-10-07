@@ -29,6 +29,15 @@ class ReflectionApiTest extends TestCase
         Sanctum::actingAs($this->user);
     }
 
+    // Logs in an assessor instead of the default student from setUp().
+    private function actAsAssessor(): User
+    {
+        $assessor = User::factory()->assessor()->create();
+        Sanctum::actingAs($assessor);
+
+        return $assessor;
+    }
+
     // ---------- Happy path ----------
 
     public function test_can_submit_a_valid_self_reflection_score(): void
@@ -131,6 +140,7 @@ class ReflectionApiTest extends TestCase
 
     public function test_can_list_reflections_most_recent_first(): void
     {
+        $this->actAsAssessor(); // assessors see everyone's reflections
         $older = Reflection::factory()->create(['created_at' => now()->subDay()]);
         $newer = Reflection::factory()->create(['created_at' => now()]);
 
@@ -171,11 +181,11 @@ class ReflectionApiTest extends TestCase
         $response->assertStatus(422)->assertJsonValidationErrors(['score']);
     }
 
-    public function test_rejects_comment_longer_than_1000_characters(): void
+    public function test_rejects_comment_longer_than_5000_characters(): void
     {
         $response = $this->postJson('/api/reflections', [
             'score'   => 3,
-            'comment' => str_repeat('a', 1001),
+            'comment' => str_repeat('a', 5001),
         ]);
 
         $response->assertStatus(422)->assertJsonValidationErrors(['comment']);
@@ -185,6 +195,7 @@ class ReflectionApiTest extends TestCase
 
     public function test_can_show_a_single_reflection_with_its_assessments(): void
     {
+        $this->actAsAssessor(); // assessors see everyone's reflections
         $reflection = Reflection::factory()->create([
             'score'  => 4,
             'scores' => $this->validCompetencyScores(),
@@ -215,6 +226,7 @@ class ReflectionApiTest extends TestCase
 
     public function test_show_returns_empty_assessments_when_none_exist(): void
     {
+        $this->actAsAssessor(); // assessors see everyone's reflections
         $reflection = Reflection::factory()->create();
 
         $response = $this->getJson("/api/reflections/{$reflection->id}");
@@ -290,12 +302,12 @@ class ReflectionApiTest extends TestCase
         $response->assertStatus(422)->assertJsonValidationErrors(['score']);
     }
 
-    public function test_update_rejects_comment_longer_than_1000_characters(): void
+    public function test_update_rejects_comment_longer_than_5000_characters(): void
     {
         $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
 
         $response = $this->putJson("/api/reflections/{$reflection->id}", [
-            'comment' => str_repeat('c', 1001),
+            'comment' => str_repeat('c', 5001),
         ]);
 
         $response->assertStatus(422)->assertJsonValidationErrors(['comment']);
@@ -326,6 +338,7 @@ class ReflectionApiTest extends TestCase
 
     public function test_list_shows_whether_each_reflection_is_assessed_or_pending(): void
     {
+        $this->actAsAssessor(); // assessors see everyone's reflections
         $assessed = Reflection::factory()->create();
         $pending  = Reflection::factory()->create();
         \App\Models\Assessment::factory()->create(['reflection_id' => $assessed->id]);
@@ -341,6 +354,7 @@ class ReflectionApiTest extends TestCase
 
     public function test_can_filter_to_only_pending_reflections(): void
     {
+        $this->actAsAssessor(); // assessors see everyone's reflections
         $assessed = Reflection::factory()->create();
         Reflection::factory()->count(2)->create();
         \App\Models\Assessment::factory()->create(['reflection_id' => $assessed->id]);
@@ -353,6 +367,7 @@ class ReflectionApiTest extends TestCase
 
     public function test_can_filter_to_only_assessed_reflections(): void
     {
+        $this->actAsAssessor(); // assessors see everyone's reflections
         $assessed = Reflection::factory()->create();
         Reflection::factory()->count(2)->create();
         \App\Models\Assessment::factory()->count(2)->create(['reflection_id' => $assessed->id]);
@@ -372,6 +387,7 @@ class ReflectionApiTest extends TestCase
 
     public function test_single_reflection_says_pending_before_it_is_assessed(): void
     {
+        $this->actAsAssessor(); // assessors see everyone's reflections
         $reflection = Reflection::factory()->create();
 
         $this->getJson("/api/reflections/{$reflection->id}")
@@ -381,6 +397,7 @@ class ReflectionApiTest extends TestCase
 
     public function test_single_reflection_says_assessed_once_it_has_a_score(): void
     {
+        $this->actAsAssessor(); // assessors see everyone's reflections
         $reflection = Reflection::factory()->create();
         \App\Models\Assessment::factory()->create(['reflection_id' => $reflection->id]);
 
@@ -439,5 +456,166 @@ class ReflectionApiTest extends TestCase
 
         $response->assertStatus(200);
         $this->assertLessThan(500, $elapsedMs, 'GET /api/reflections took too long with 100 rows.');
+    }
+
+    // ---------- Journal entries saved on the server ----------
+
+    public function test_can_save_title_and_category_with_a_reflection(): void
+    {
+        $response = $this->postJson('/api/reflections', [
+            'score'     => 4,
+            'comment'   => 'Learned a lot about estimating.',
+            'gig_title' => 'Sprint 3 retro',
+            'category'  => 'Development',
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('data.gig_title', 'Sprint 3 retro')
+            ->assertJsonPath('data.category', 'Development');
+        $this->assertDatabaseHas('reflections', [
+            'user_id'   => $this->user->id,
+            'gig_title' => 'Sprint 3 retro',
+            'category'  => 'Development',
+        ]);
+    }
+
+    public function test_title_and_category_are_optional(): void
+    {
+        $this->postJson('/api/reflections', ['score' => 3])
+            ->assertStatus(201)
+            ->assertJsonPath('data.gig_title', null);
+    }
+
+    public function test_can_update_title_and_category(): void
+    {
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id, 'gig_title' => 'Old']);
+
+        $this->putJson("/api/reflections/{$reflection->id}", [
+            'gig_title' => 'New title',
+            'category'  => 'Research',
+        ])->assertStatus(200)->assertJsonPath('data.gig_title', 'New title');
+    }
+
+    public function test_rejects_a_title_longer_than_255_characters(): void
+    {
+        $this->postJson('/api/reflections', ['score' => 3, 'gig_title' => str_repeat('a', 256)])
+            ->assertStatus(422)->assertJsonValidationErrors(['gig_title']);
+    }
+
+    public function test_a_long_reflection_up_to_5000_characters_is_accepted(): void
+    {
+        $this->postJson('/api/reflections', ['score' => 3, 'comment' => str_repeat('a', 5000)])
+            ->assertStatus(201);
+    }
+
+    public function test_each_save_without_an_id_creates_a_separate_reflection(): void
+    {
+        $this->postJson('/api/reflections', ['score' => 3, 'gig_title' => 'First']);
+        $this->postJson('/api/reflections', ['score' => 4, 'gig_title' => 'Second']);
+
+        $this->assertSame(2, Reflection::where('user_id', $this->user->id)->count());
+    }
+
+    // ---------- Who can see which reflections ----------
+
+    public function test_a_student_only_lists_their_own_reflections(): void
+    {
+        $mine = Reflection::factory()->create(['user_id' => $this->user->id, 'gig_title' => 'Mine']);
+        Reflection::factory()->count(2)->create(); // belong to other students
+
+        $response = $this->getJson('/api/reflections');
+
+        $response->assertStatus(200)->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $mine->id);
+        $this->assertSame(1, $response->json('meta.total'));
+    }
+
+    public function test_the_list_includes_title_category_and_evidence(): void
+    {
+        $mine = Reflection::factory()->create([
+            'user_id' => $this->user->id, 'gig_title' => 'Mine', 'category' => 'Other',
+        ]);
+        \App\Models\Evidence::create([
+            'reflection_id' => $mine->id, 'type' => 'link', 'link' => 'https://example.com/a',
+        ]);
+
+        $this->getJson('/api/reflections')
+            ->assertStatus(200)
+            ->assertJsonPath('data.0.gig_title', 'Mine')
+            ->assertJsonPath('data.0.category', 'Other')
+            ->assertJsonCount(1, 'data.0.evidence');
+    }
+
+    public function test_an_assessor_lists_everyones_reflections(): void
+    {
+        Reflection::factory()->count(3)->create();
+        $this->actAsAssessor();
+
+        $this->getJson('/api/reflections')->assertStatus(200)->assertJsonCount(3, 'data');
+    }
+
+    public function test_an_assessor_can_ask_for_only_their_own_reflections(): void
+    {
+        Reflection::factory()->count(3)->create();
+        $assessor = $this->actAsAssessor();
+        $own = Reflection::factory()->create(['user_id' => $assessor->id]);
+
+        $this->getJson('/api/reflections?mine=1')
+            ->assertStatus(200)->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $own->id);
+    }
+
+    public function test_the_status_filter_still_only_covers_a_students_own_reflections(): void
+    {
+        Reflection::factory()->count(2)->create(); // other students, pending
+        $mine = Reflection::factory()->create(['user_id' => $this->user->id]);
+
+        $this->getJson('/api/reflections?status=pending')
+            ->assertStatus(200)->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $mine->id);
+    }
+
+    public function test_a_student_can_show_their_own_reflection(): void
+    {
+        $mine = Reflection::factory()->create(['user_id' => $this->user->id]);
+
+        $this->getJson("/api/reflections/{$mine->id}")->assertStatus(200)->assertJsonPath('data.id', $mine->id);
+    }
+
+    public function test_a_student_cannot_show_another_students_reflection(): void
+    {
+        $theirs = Reflection::factory()->create();
+
+        $this->getJson("/api/reflections/{$theirs->id}")->assertStatus(403)->assertJson(['success' => false]);
+    }
+
+    public function test_an_assessor_can_show_any_reflection(): void
+    {
+        $theirs = Reflection::factory()->create();
+        $this->actAsAssessor();
+
+        $this->getJson("/api/reflections/{$theirs->id}")->assertStatus(200)->assertJsonPath('data.id', $theirs->id);
+    }
+
+    // ---------- PDF export ----------
+
+    public function test_the_pdf_view_shows_the_entry_title_and_category(): void
+    {
+        $reflection = Reflection::factory()->create([
+            'user_id' => $this->user->id, 'gig_title' => 'Sprint 3 retro', 'category' => 'Development',
+        ]);
+
+        $html = view('journal.export', ['reflections' => collect([$reflection])])->render();
+
+        $this->assertStringContainsString('Sprint 3 retro', $html);
+        $this->assertStringContainsString('Development', $html);
+    }
+
+    public function test_the_pdf_export_returns_a_pdf_file(): void
+    {
+        Reflection::factory()->create(['user_id' => $this->user->id, 'gig_title' => 'Mine']);
+        Reflection::factory()->create(['gig_title' => 'Someone elses']);
+
+        $response = $this->get('/api/journal/export');
+
+        $response->assertStatus(200);
+        $this->assertStringStartsWith('%PDF', $response->getContent());
     }
 }

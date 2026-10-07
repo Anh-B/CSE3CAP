@@ -225,8 +225,8 @@
             // Lists every reflection the logged-in user can see, so an
             // assessor can tell which ones still need their scores.
             // Matches ReflectionController@index: GET /api/reflections.
-            async listReflections() {
-                const res = await fetch(`${API_BASE_URL}/reflections`, {
+            async listReflections(query = "") {
+                const res = await fetch(`${API_BASE_URL}/reflections${query}`, {
                     headers: authHeaders(),
                 });
                 return parseJsonResponse(res, "listReflections");
@@ -254,10 +254,38 @@
                     body: JSON.stringify({
                         score: averageScore(payload.scores),
                         comment: payload.reflection || null,
+                        gig_title: payload.gigTitle || null,
+                        category: payload.category || null,
                         scores: payload.scores || null,
                     }),
                 });
                 return parseJsonResponse(res, "saveReflectionEntry");
+            },
+            // Deletes a reflection (and its evidence) from the server.
+            // Matches ReflectionController@destroy: DELETE /api/reflections/{id}.
+            async deleteReflection(reflectionId) {
+                const res = await fetch(`${API_BASE_URL}/reflections/${reflectionId}`, {
+                    method: "DELETE",
+                    headers: authHeaders(),
+                });
+                return parseJsonResponse(res, "deleteReflection");
+            },
+            // Downloads the logged-in user's own journal as a PDF.
+            // Matches JournalExportController@export: GET /api/journal/export.
+            async exportJournal() {
+                const headers = {};
+                if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+                const res = await fetch(`${API_BASE_URL}/journal/export`, { headers });
+                if (!res.ok) throw new Error("Could not export the journal.");
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "reflection-journal.pdf";
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
             },
             // Saves the student's self-assessment competency scores by
             // creating/updating a reflection entry that carries them.
@@ -513,21 +541,37 @@
             // (and, in turn, the assessor scores) are saved against. Kept in
             // localStorage too so the radar chart still knows which
             // reflection to update after a page refresh.
-            const [currentReflectionId, setCurrentReflectionId] = useState(() => {
-                try {
-                    return localStorage.getItem("alumableCurrentReflectionId") || null;
-                } catch (error) {
-                    return null;
-                }
-            });
+            // Not stored in the browser any more: every login starts with
+            // a clean radar chart, and opening a saved reflection from the
+            // list loads that reflection's own scores from the server.
+            const [currentReflectionId, setCurrentReflectionId] = useState(null);
 
             const [entryForms, setEntryForms] = useState(() => [makeBlankEntryForm()]);
-            const [entries, setEntries] = useState(() => {
-                try {
-                    return JSON.parse(localStorage.getItem("alumableReflectionEntries") || "[]");
-                } catch (error) {
-                    return [];
-                }
+            // The saved-entry list lives on the server (one reflection per
+            // entry) and is loaded again after every login, so the same
+            // account sees the same entries in any browser.
+            const [entries, setEntries] = useState([]);
+            const [entriesLoading, setEntriesLoading] = useState(false);
+            const [entriesError, setEntriesError] = useState(null);
+
+            // Turns a reflection returned by the API into a list entry.
+            const entryFromServer = (r) => ({
+                id: String(r.id),
+                serverId: r.id,
+                gigTitle: r.gig_title || "Untitled reflection",
+                category: r.category || "Other",
+                reflection: r.comment || "",
+                attachments: (r.evidence || []).map((ev) => ({
+                    id: `ev-${ev.id}`,
+                    evidenceId: ev.id,
+                    name: ev.original_name || "file",
+                    size: ev.size,
+                    type: (ev.mime_type || "").includes("pdf") ? "pdf" : "txt",
+                    uploaded: true,
+                })),
+                scores: r.scores || null,
+                entryDate: r.created_at,
+                updatedAt: r.updated_at,
             });
 
             // Saved-entry list controls: search, category filter and sorting
@@ -578,7 +622,31 @@
             const [registerError, setRegisterError] = useState(null);
             const [registerLoading, setRegisterLoading] = useState(false);
 
+            // Clears everything that belongs to the previous user so one
+            // account's data never shows up under another login.
+            const resetWorkspace = () => {
+                setEntries([]);
+                setEntriesError(null);
+                setEntryForms([makeBlankEntryForm()]);
+                setScores(blankScores());
+                setSavedSelfScores(blankScores());
+                setAssessorScores(assessorDefaultScores);
+                setSavedAssessorScores(assessorDefaultScores);
+                setCurrentReflectionId(null);
+                setAssessmentStatus(null);
+                setAssessorHasSubmitted(false);
+                setPendingReflections([]);
+                setRadarLoadError(null);
+                setSearchTerm("");
+                setCategoryFilter("All");
+                try {
+                    localStorage.removeItem("alumableCurrentReflectionId");
+                    localStorage.removeItem("alumableReflectionEntries");
+                } catch (error) {}
+            };
+
             const applyLoggedInSession = (token, user) => {
+                resetWorkspace();
                 setStoredAuthToken(token);
                 setAuthTokenState(token);
                 setAuthUser(user || null);
@@ -632,6 +700,7 @@
             };
 
             const handleLogout = () => {
+                resetWorkspace();
                 setStoredAuthToken(null);
                 setAuthTokenState(null);
                 setAuthUser(null);
@@ -667,10 +736,29 @@
             // eslint-disable-next-line react-hooks/exhaustive-deps
             }, [isAssessor, authTokenState]);
 
-            // Sync entries with LocalStorage
+            // Load this user's own saved reflections from the server
+            // whenever someone is logged in (also after a page refresh).
+            // ?mine=1 keeps an assessor's own list free of other people's.
             useEffect(() => {
-                localStorage.setItem("alumableReflectionEntries", JSON.stringify(entries));
-            }, [entries]);
+                if (!authTokenState) return;
+                let cancelled = false;
+                setEntriesLoading(true);
+                setEntriesError(null);
+                api.listReflections("?mine=1&per_page=100")
+                    .then((res) => {
+                        if (cancelled) return;
+                        const list = Array.isArray(res?.data) ? res.data : [];
+                        setEntries(list.map(entryFromServer));
+                    })
+                    .catch((error) => {
+                        if (!cancelled) setEntriesError(error.message);
+                    })
+                    .finally(() => {
+                        if (!cancelled) setEntriesLoading(false);
+                    });
+                return () => { cancelled = true; };
+            // eslint-disable-next-line react-hooks/exhaustive-deps
+            }, [authTokenState]);
 
             // Sprint 5: rebuild the radar chart from the live API on load
             // (and again right after logging in), instead of trusting
@@ -690,9 +778,10 @@
 
                         setAssessmentStatus(data.assessment_status || null);
 
-                        if (data.scores) {
-                            setScores({ ...blankScores(), ...data.scores });
-                            setSavedSelfScores({ ...blankScores(), ...data.scores });
+                        {
+                            const own = { ...blankScores(), ...(data.scores || {}) };
+                            setScores(own);
+                            setSavedSelfScores(own);
                         }
 
                         const latestAssessment = (data.assessments || [])[data.assessments.length - 1];
@@ -713,7 +802,7 @@
                         setRadarLoadError(error.message);
                     });
             // eslint-disable-next-line react-hooks/exhaustive-deps
-            }, [authTokenState]);
+            }, [authTokenState, currentReflectionId]);
 
             const updateEntryForm = (formId, field, value) => {
                 setEntryForms((forms) =>
@@ -795,6 +884,10 @@
             const addNewEntryForm = () => {
                 const newForm = makeBlankEntryForm();
                 setScores(blankScores());
+                setSavedSelfScores(blankScores());
+                setCurrentReflectionId(null);
+                setAssessmentStatus(null);
+                setAssessorHasSubmitted(false);
                 setEntryForms([newForm]);
 
                 setTimeout(() => {
@@ -817,93 +910,75 @@
                     return;
                 }
 
-                const now = new Date();
-                const entryId =
-                    form.savedEntryId ||
-                    `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                const existing = form.savedEntryId
+                    ? entries.find((entry) => entry.id === form.savedEntryId)
+                    : null;
 
-                const previousEntry = entries.find((entry) => entry.id === entryId);
-
-                const savedEntry = {
-                    id: entryId,
+                const payload = {
                     gigTitle: form.gigTitle.trim(),
                     category: form.category || "Other",
                     reflection: form.reflection.trim(),
-                    attachments: form.attachments || [],
                     scores: { ...scores },
-                    entryDate: previousEntry?.entryDate || now.toISOString(),
-                    updatedAt: now.toISOString(),
                 };
 
-                // Update local storage / state
+                setFormStatus(formId, "Saving...");
+
+                let saved;
+                try {
+                    // POST creates a new reflection; PUT updates the one this
+                    // form was opened from.
+                    const res = await api.saveReflectionEntry(payload, existing?.serverId || null);
+                    saved = res?.data;
+                    if (!saved?.id) throw new Error("The server did not return an id.");
+                } catch (error) {
+                    setFormStatus(formId, `Could not save to the server: ${error.message}`);
+                    return;
+                }
+
+                // Upload any files that have not been sent yet.
+                let attachments = form.attachments || [];
+                const failed = [];
+                for (const attachment of attachments.filter((att) => att.file && !att.uploaded)) {
+                    try {
+                        const evidenceRes = await api.uploadEvidence(saved.id, attachment.file, payload.gigTitle);
+                        const evidence = evidenceRes?.data;
+                        attachments = attachments.map((att) =>
+                            att.id === attachment.id
+                                ? { ...att, uploaded: true, evidenceId: evidence?.id, file: null }
+                                : att
+                        );
+                    } catch (error) {
+                        failed.push(`"${attachment.name}" (${error.message})`);
+                    }
+                }
+
+                const savedEntry = {
+                    ...entryFromServer(saved),
+                    attachments,
+                    scores: payload.scores,
+                };
+
                 setEntries((current) => {
-                    const exists = current.some((entry) => entry.id === entryId);
+                    const exists = current.some((entry) => entry.id === savedEntry.id);
                     return exists
-                        ? current.map((entry) => (entry.id === entryId ? savedEntry : entry))
+                        ? current.map((entry) => (entry.id === savedEntry.id ? savedEntry : entry))
                         : [savedEntry, ...current];
                 });
 
-                // Update Radar live snapshot
                 setSavedSelfScores({ ...scores });
+                setCurrentReflectionId(saved.id);
+                if (!existing) setAssessmentStatus("pending");
 
-                // Save to the backend (POST creates the reflection the
-                // first time, PUT updates it after that) and remember its
-                // id so the assessor's scores can be linked to it later.
-                api.saveReflectionEntry(savedEntry, currentReflectionId)
-                    .then(async (res) => {
-                        const id = res?.data?.id;
-                        if (!id) return;
-                        
-                        setCurrentReflectionId(id);
-                        setAssessmentStatus((status) => status || "pending");
-                        try {
-                            localStorage.setItem("alumableCurrentReflectionId", id);
-                        } catch (error) {}
+                const message = failed.length
+                    ? `Entry saved, but these files failed to upload: ${failed.join(", ")}`
+                    : createAnother
+                        ? "Entry saved. A new form has been created."
+                        : "Reflection entry & attachments saved to journal.";
 
-                    const currentForm = entryForms.find((item) => item.formId === formId);
-                    const pending = (currentForm?.attachments || []).filter((att) => att.file && !att.uploaded);
-
-                    for (const attachment of pending) {
-                        try {
-                            const evidenceRes = await api.uploadEvidence(id, attachment.file, currentForm.gigTitle);
-                            const evidence = evidenceRes?.data;
-                            setEntryForms((forms) =>
-                                forms.map((form) =>
-                                    form.formId === formId
-                                        ? {
-                                            ...form,
-                                            attachments: form.attachments.map((att) =>
-                                                att.id === attachment.id
-                                                    ? {
-                                                        ...att,
-                                                        uploaded: true,
-                                                        evidenceId: evidence?.id,
-                                                        file: null,
-                                                        }
-                                                    : att
-                                            ),
-                                        }
-                                    :form
-                                )
-                            );
-                        }  catch (error) {
-                                setFormStatus(formId, `Entry saved, but "${attachment.name}" failed to upload: ${error.message}`);
-                        }          
-                    }
-                })
-                .catch((error) => {
-                    setFormStatus(formId, `Saved locally, but the server rejected it: ${error.message}`);
-                });
                 setEntryForms((forms) =>
                     forms.map((item) =>
                         item.formId === formId
-                            ? {
-                                  ...item,
-                                  savedEntryId: entryId,
-                                  status: createAnother
-                                      ? "Entry saved. A new form has been created."
-                                      : "Reflection entry & attachments saved to journal.",
-                              }
+                            ? { ...item, savedEntryId: savedEntry.id, attachments, status: message }
                             : item
                     )
                 );
@@ -911,11 +986,15 @@
                 if (createAnother) {
                     addNewEntryForm();
                 } else {
-                    setTimeout(() => setFormStatus(formId, ""), 3500);
+                    setTimeout(() => setFormStatus(formId, ""), failed.length ? 8000 : 3500);
                 }
             };
 
             const loadEntry = (entry) => {
+                // Remember which reflection is open so the radar chart and
+                // assessor tab load its own scores from the server.
+                setCurrentReflectionId(entry.serverId);
+
                 const existingForm = entryForms.find(
                     (form) => form.savedEntryId === entry.id
                 );
@@ -956,36 +1035,52 @@
                 setTimeout(() => setFormStatus(loadedForm.formId, ""), 3000);
             };
 
-            const deleteEntry = (entryId) => {
-                setEntries((current) => current.filter((entry) => entry.id !== entryId));
+            const deleteEntry = async (entryId) => {
+                const entry = entries.find((item) => item.id === entryId);
+                if (!entry) return;
 
-                setEntryForms((forms) => {
-                    const deletedFormIsOpen = forms.some(
-                        (form) => form.savedEntryId === entryId
-                    );
-                    return deletedFormIsOpen ? [makeBlankEntryForm()] : forms;
-                });
+                try {
+                    await api.deleteReflection(entry.serverId);
+                } catch (error) {
+                    alert(`Could not delete this reflection from the server: ${error.message}`);
+                    return;
+                }
 
-                const deletedEntry = entryForms.find((form) => form.savedEntryId === entryId);
-                if (deletedEntry) {
+                setEntries((current) => current.filter((item) => item.id !== entryId));
+
+                const deletedFormIsOpen = entryForms.some((form) => form.savedEntryId === entryId);
+                if (deletedFormIsOpen) {
+                    setEntryForms([makeBlankEntryForm()]);
                     setScores(blankScores());
+                    setSavedSelfScores(blankScores());
+                }
+                if (String(currentReflectionId) === entryId) {
+                    setCurrentReflectionId(null);
+                    setAssessmentStatus(null);
+                    setAssessorHasSubmitted(false);
                 }
             };
 
             const handleSaveSelfScores = () => {
+                // Scores belong to a saved reflection, so one has to be open.
+                if (!currentReflectionId) {
+                    setSelfSaveStatus("error: Save or open a reflection in tab 01 first, then score it here.");
+                    setTimeout(() => setSelfSaveStatus(null), 4000);
+                    return;
+                }
+
                 setSavedSelfScores({ ...scores });
                 setSelfSaveStatus("saved");
 
                 api.saveSelfScores(scores, currentReflectionId)
-                    .then((res) => {
-                        const id = res?.data?.id;
-                        if (id) {
-                            setCurrentReflectionId(id);
-                            setAssessmentStatus((status) => status || "pending");
-                            try {
-                                localStorage.setItem("alumableCurrentReflectionId", id);
-                            } catch (error) {}
-                        }
+                    .then(() => {
+                        setEntries((current) =>
+                            current.map((entry) =>
+                                String(entry.serverId) === String(currentReflectionId)
+                                    ? { ...entry, scores: { ...scores } }
+                                    : entry
+                            )
+                        );
                     })
                     .catch((error) => {
                         setSelfSaveStatus(`error: ${error.message}`);
@@ -1009,7 +1104,7 @@
             };
 
             const handleExportPDF = () => {
-                window.print();
+                api.exportJournal().catch((error) => alert(error.message));
             };
 
             // Apply search + category filter + sorting to the saved entries list.
@@ -1685,7 +1780,11 @@
 
                                         {entries.length === 0 ? (
                                             <p className="text-sm" style={{ color: tokens.inkSoft }}>
-                                                No entries saved yet. Reflections you save will appear here.
+                                                {entriesLoading
+                                                    ? "Loading your saved reflections..."
+                                                    : entriesError
+                                                        ? `Could not load your saved reflections: ${entriesError}`
+                                                        : "No entries saved yet. Reflections you save will appear here."}
                                             </p>
                                         ) : displayedEntries.length === 0 ? (
                                             <div
@@ -1759,10 +1858,13 @@
                                                                     {attachmentCount > 0 && (
                                                                         <div className="mt-3 flex flex-wrap gap-2">
                                                                             {entry.attachments.map((file) => (
-                                                                                <a
+                                                                                <button
+                                                                                    type="button"
                                                                                     key={file.id}
-                                                                                    href={file.dataUrl}
-                                                                                    download={file.name}
+                                                                                    onClick={() =>
+                                                                                        file.evidenceId &&
+                                                                                        api.downloadEvidence(file.evidenceId, file.name).catch((error) => alert(error.message))
+                                                                                    }
                                                                                     className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium transition hover:underline"
                                                                                     style={{
                                                                                         backgroundColor: tokens.brassTint,
@@ -1774,7 +1876,7 @@
                                                                                     <FileText size={11} />
                                                                                     <span className="max-w-[160px] truncate">{file.name}</span>
                                                                                     <Download size={10} />
-                                                                                </a>
+                                                                                </button>
                                                                             ))}
                                                                         </div>
                                                                     )}
@@ -2152,7 +2254,6 @@
                                                             <button
                                                                 onClick={() => {
                                                                     setCurrentReflectionId(r.id);
-                                                                    try { localStorage.setItem("alumableCurrentReflectionId", r.id); } catch (error) {}
                                                                     scrollTo("assessor");
                                                                 }}
                                                                 className="text-xs font-medium px-3 py-1.5 rounded-md transition hover:brightness-110"

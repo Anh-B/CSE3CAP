@@ -16,6 +16,17 @@ class EvidenceController extends Controller
     const ALLOWED_TYPES = 'pdf,doc,docx,ppt,pptx,xls,xlsx,txt,csv,png,jpg,jpeg,gif,webp,zip';
 
     /**
+     * The owner of a reflection (and any assessor) can view its evidence.
+     */
+    private function canAccess(Reflection $reflection): bool
+    {
+        $user = auth()->user();
+
+        return $user->role === 'assessor'
+            || (int) $reflection->user_id === (int) $user->id;
+    }
+
+    /**
      * Attach evidence to a reflection.
      * Send either a `file` (multipart upload) or a `link` - not both.
      */
@@ -101,6 +112,14 @@ class EvidenceController extends Controller
             ], 404);
         }
 
+        // Only the owner or an assessor can see what was attached
+        if (!$this->canAccess($reflection)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You can only view evidence on your own reflections.'
+            ], 403);
+        }
+
         return response()->json([
             'success' => true,
             'data'    => $reflection->evidence()->latest()->get()
@@ -119,6 +138,14 @@ class EvidenceController extends Controller
                 'success' => false,
                 'message' => 'Evidence not found.'
             ], 404);
+        }
+
+        // Only the owner of the reflection or an assessor can download it
+        if (!$this->canAccess($evidence->reflection)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You can only download evidence on your own reflections.'
+            ], 403);
         }
 
         if ($evidence->type !== 'file' || !Storage::exists($evidence->file_path)) {
