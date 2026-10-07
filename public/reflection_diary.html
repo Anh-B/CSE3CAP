@@ -1894,7 +1894,8 @@
                                     style={{ backgroundColor: tokens.sagePanel, border: `1px solid ${tokens.sage}`, boxShadow: "0 4px 16px rgba(63,90,69,0.08)" }}
                                 >
                                     <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
-                                            <SectionEyebrow no="03" label="Supervisor / Assessor Feedback" accent={tokens.sage} accentDark={tokens.sageDark} />
+                                        <div className="flex items-center gap-2 flex-wrap">   
+                                        <SectionEyebrow no="03" label="Supervisor / Assessor Feedback" accent={tokens.sage} accentDark={tokens.sageDark} />
                                             {assessmentStatus && (
                                                 <span
                                                     className="text-xs font-medium px-2.5 py-1 rounded-full"
