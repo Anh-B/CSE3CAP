@@ -222,6 +222,15 @@
                 });
                 return parseJsonResponse(res, "login");
             },
+            // Lists every reflection the logged-in user can see, so an
+            // assessor can tell which ones still need their scores.
+            // Matches ReflectionController@index: GET /api/reflections.
+            async listReflections() {
+                const res = await fetch(`${API_BASE_URL}/reflections`, {
+                    headers: authHeaders(),
+                });
+                return parseJsonResponse(res, "listReflections");
+            },
             // Fetches one reflection entry together with any assessor
             // feedback on it, so the radar chart can be rebuilt straight
             // from the server on load. Matches ReflectionController@show:
@@ -338,6 +347,9 @@
             { key: "self", no: "02", label: "Self-Assessment", accent: tokens.dusk, accentDark: tokens.duskDark },
             { key: "assessor", no: "03", label: "Assessor Feedback", accent: tokens.sage, accentDark: tokens.sageDark },
             { key: "progress", no: "04", label: "Progress Overview", accent: tokens.wine, accentDark: tokens.wineDark },
+            // Assessor-only — filtered out for students when the tab nav
+            // is rendered.
+            { key: "pending", no: "05", label: "Pending Assessments", accent: tokens.brass, accentDark: tokens.brassDark },
         ];
 
         function SectionEyebrow({ no, label, accent, accentDark }) {
@@ -365,7 +377,7 @@
         }
 
         // ---- Radar chart: self vs assessor across the 6 competencies ----
-        function RadarChart({ selfScores, assessorScores, competencies, tokens }) {
+        function RadarChart({ selfScores, assessorScores, competencies, tokens, showAssessor }) {
             const canvasRef = useRef(null);
             const chartRef = useRef(null);
 
@@ -373,11 +385,17 @@
                 if (!canvasRef.current || typeof Chart === "undefined") return;
 
                 const selfData = competencies.map((c) => selfScores[c.key] || 0);
-                const assessorData = competencies.map((c) => assessorScores[c.key] || 0);
+                // Per chị Lan: don't draw an assessor line at all until an
+                // assessor has actually submitted real scores — the sample
+                // default numbers shouldn't look like a real assessment.
+                const assessorData = showAssessor
+                    ? competencies.map((c) => assessorScores[c.key] || 0)
+                    : competencies.map(() => null);
 
                 if (chartRef.current) {
                     chartRef.current.data.datasets[0].data = selfData;
                     chartRef.current.data.datasets[1].data = assessorData;
+                    chartRef.current.data.datasets[1].hidden = !showAssessor;
                     chartRef.current.update();
                     return;
                 }
@@ -401,6 +419,7 @@
                             {
                                 label: "Assessor / Supervisor",
                                 data: assessorData,
+                                hidden: !showAssessor,
                                 borderColor: tokens.sageDark,
                                 backgroundColor: `${tokens.sage}33`,
                                 borderWidth: 2,
@@ -415,6 +434,11 @@
                         responsive: true,
                         maintainAspectRatio: false,
                         animation: { duration: 450 },
+                        // Extra breathing room around the plot area so the
+                        // competency labels at the edges (e.g.
+                        // "Communication", "Continuous Improvement") don't
+                        // get clipped by the canvas bounds.
+                        layout: { padding: 24 },
                         plugins: {
                             legend: { display: false },
                             tooltip: {
@@ -427,17 +451,18 @@
                             r: {
                                 min: 0,
                                 max: 5,
-                                ticks: { 
-                                    stepSize: 1, 
-                                    backdropColor: "transparent", 
-                                    color: tokens.inkSoft, 
-                                    font: { size: 10, family: "'IBM Plex Mono', monospace" } 
+                                ticks: {
+                                    stepSize: 1,
+                                    backdropColor: "transparent",
+                                    color: tokens.inkSoft,
+                                    font: { size: 10, family: "'IBM Plex Mono', monospace" }
                                 },
                                 grid: { color: tokens.rule },
                                 angleLines: { color: tokens.rule },
-                                pointLabels: { 
-                                    font: { size: 11, family: "'Inter', sans-serif", weight: '500' }, 
-                                    color: tokens.ink 
+                                pointLabels: {
+                                    font: { size: 11, family: "'Inter', sans-serif", weight: '500' },
+                                    color: tokens.ink,
+                                    padding: 12,
                                 },
                             },
                         },
@@ -450,7 +475,7 @@
                         chartRef.current = null;
                     }
                 };
-            }, [selfScores, assessorScores, competencies, tokens]);
+            }, [selfScores, assessorScores, competencies, tokens, showAssessor]);
 
             return <canvas ref={canvasRef} role="img" aria-label="Radar chart comparing self and assessor scores" />;
         }
@@ -514,6 +539,19 @@
             const [selfSaveStatus, setSelfSaveStatus] = useState(null);
             const [assessorSaveStatus, setAssessorSaveStatus] = useState(null);
             const [radarLoadError, setRadarLoadError] = useState(null);
+
+            // Sprint 5 (per chị Lan's feedback): the radar chart and the
+            // Assessor Feedback tab should only show an assessor line/let
+            // someone submit scores once an assessor has actually
+            // submitted a real assessment for this reflection — not just
+            // because the tab has sample default numbers sitting in it.
+            const [assessorHasSubmitted, setAssessorHasSubmitted] = useState(false);
+
+            // Sprint 5: assessors get a "Pending Assessments" list so they
+            // can tell which reflections still need their scores.
+            const [pendingReflections, setPendingReflections] = useState([]);
+            const [pendingLoading, setPendingLoading] = useState(false);
+            const [pendingError, setPendingError] = useState(null);
 
             // Sprint 5: login state. `authTokenState` mirrors the
             // module-level `authToken` variable in the api layer (see
@@ -600,6 +638,35 @@
                 try { localStorage.removeItem("alumableAuthUser"); } catch (error) {}
             };
 
+            // Only an account registered/created as "assessor" can mark
+            // the Assessor Feedback tab — a student logging in should see
+            // it locked, per chị Lan's feedback.
+            const isAssessor = authUser?.role === "assessor";
+
+            const loadPendingReflections = () => {
+                setPendingLoading(true);
+                setPendingError(null);
+                api.listReflections()
+                    .then((res) => {
+                        const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
+                        setPendingReflections(list);
+                    })
+                    .catch((error) => {
+                        setPendingError(error.message);
+                    })
+                    .finally(() => setPendingLoading(false));
+            };
+
+            // Assessors land on tab 03 wanting to know what's left to
+            // grade, so pull the list as soon as we know they're an
+            // assessor (and again whenever they log in/out).
+            useEffect(() => {
+                if (isAssessor && authTokenState) {
+                    loadPendingReflections();
+                }
+            // eslint-disable-next-line react-hooks/exhaustive-deps
+            }, [isAssessor, authTokenState]);
+
             // Sync entries with LocalStorage
             useEffect(() => {
                 localStorage.setItem("alumableReflectionEntries", JSON.stringify(entries));
@@ -632,6 +699,12 @@
                         if (latestAssessment?.scores) {
                             setAssessorScores({ ...assessorDefaultScores, ...latestAssessment.scores });
                             setSavedAssessorScores({ ...assessorDefaultScores, ...latestAssessment.scores });
+                            setAssessorHasSubmitted(true);
+                        } else {
+                            // No real assessment on this reflection yet —
+                            // the radar chart and tab 3 should not pretend
+                            // there is one.
+                            setAssessorHasSubmitted(false);
                         }
 
                         setRadarLoadError(null);
@@ -924,6 +997,7 @@
             const handleSaveAssessorScores = () => {
                 setSavedAssessorScores({ ...assessorScores });
                 setAssessorSaveStatus("saved");
+                setAssessorHasSubmitted(true);
 
                 api.saveAssessorScores(assessorScores, currentReflectionId)
                     .then(() => setAssessmentStatus("assessed"))
@@ -987,9 +1061,13 @@
                 self: useRef(null),
                 assessor: useRef(null),
                 progress: useRef(null),
+                pending: useRef(null),
             };
 
             const scrollTo = (key) => refMap[key]?.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+            // Students never see the Pending Assessments tab.
+            const visibleTabs = isAssessor ? tabs : tabs.filter((t) => t.key !== "pending");
 
             const today = new Date().toLocaleDateString("en-AU", { day: "2-digit", month: "short", year: "numeric" });
 
@@ -1178,21 +1256,6 @@
                                         style={{ backgroundColor: "#1C2430", color: "#F8F4E9", border: "1px solid rgba(255,255,255,0.15)" }}
                                     />
                                 </div>
-                                <div style={{ minWidth: 120 }}>
-                                    <label className="block text-[10px] tracking-wider mb-1" style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#C9AE7E" }}>
-                                        ROLE
-                                    </label>
-                                    <select
-                                        value={registerRole}
-                                        onChange={(e) => setRegisterRole(e.target.value)}
-                                        className="w-full rounded-md px-3 py-1.5 text-sm outline-none"
-                                        style={{ backgroundColor: "#1C2430", color: "#F8F4E9", border: "1px solid rgba(255,255,255,0.15)" }}
-                                    >
-                                        {/* Sign-up only creates students. Assessor accounts are
-                                            provided by the team (php artisan assessor:create). */}
-                                        <option value="student">student</option>
-                                    </select>
-                                </div>
                                 <button
                                     type="submit"
                                     disabled={registerLoading}
@@ -1227,7 +1290,7 @@
                             >
                                 JUMP TO SECTION
                             </span>
-                            {tabs.map((t) => (
+                            {visibleTabs.map((t) => (
                                 <TabButton key={t.key} tab={t} />
                             ))}
 
@@ -1241,7 +1304,7 @@
                         <div className="flex-1 min-w-0">
                             {/* Mobile horizontal tabs (hidden in print) */}
                             <div className="no-print flex md:hidden gap-2 overflow-x-auto pb-4 mb-2 -mx-1 px-1">
-                                {tabs.map((t) => (
+                                {visibleTabs.map((t) => (
                                     <TabButton key={t.key} tab={t} horizontal />
                                 ))}
                             </div>
@@ -1388,7 +1451,7 @@
                                                     rows={7}
                                                     value={form.reflection}
                                                     onChange={(e) => updateEntryForm(form.formId, "reflection", e.target.value)}
-                                                    placeholder="What did you contribute this sprint? What would you do differently next time?"
+                                                    placeholder={"What did you contribute to this project/gig?\n\n\nWhat would you do differently next time?"}
                                                     className="ruled-textarea w-full rounded-md px-4 outline-none resize-none text-[15px]"
                                                     style={{
                                                         border: `1px solid ${tokens.rule}`,
@@ -1831,8 +1894,8 @@
                                     style={{ backgroundColor: tokens.sagePanel, border: `1px solid ${tokens.sage}`, boxShadow: "0 4px 16px rgba(63,90,69,0.08)" }}
                                 >
                                     <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            <SectionEyebrow no="03" label="Supervisor / Assessor Feedback" accent={tokens.sage} accentDark={tokens.sageDark} />
+                                        <div className="flex items-center gap-2 flex-wrap">   
+                                        <SectionEyebrow no="03" label="Supervisor / Assessor Feedback" accent={tokens.sage} accentDark={tokens.sageDark} />
                                             {assessmentStatus && (
                                                 <span
                                                     className="text-xs font-medium px-2.5 py-1 rounded-full"
@@ -1844,92 +1907,113 @@
                                                 </span>
                                             )}
                                         </div>
-                                        <button
-                                            onClick={() => setIsAssessorReadOnly(!isAssessorReadOnly)}
-                                            className="no-print flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full transition hover:bg-black/5"
-                                            style={{ backgroundColor: tokens.parchmentWarm, color: tokens.sageDark, border: `1px solid ${tokens.sage}` }}
-                                        >
-                                            {isAssessorReadOnly ? <Lock size={12} /> : <Unlock size={12} />}
-                                            {isAssessorReadOnly ? "Locked (Read-only)" : "Supervisor Edit Mode"}
-                                        </button>
+                                        {isAssessor && (
+                                            <button
+                                                onClick={() => setIsAssessorReadOnly(!isAssessorReadOnly)}
+                                                className="no-print flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full transition hover:bg-black/5"
+                                                style={{ backgroundColor: tokens.parchmentWarm, color: tokens.sageDark, border: `1px solid ${tokens.sage}` }}
+                                            >
+                                                {isAssessorReadOnly ? <Lock size={12} /> : <Unlock size={12} />}
+                                                {isAssessorReadOnly ? "Locked (Read-only)" : "Supervisor Edit Mode"}
+                                            </button>
+                                        )}
                                     </div>
-                                    <p className="text-sm mb-6" style={{ color: tokens.sageDark }}>
-                                        {isAssessorReadOnly 
-                                            ? "Completed by your supervisor or employer — read-only view." 
-                                            : "For supervisor or employer: rate the student, 1 to 5, across the six competencies."}
-                                    </p>
 
-                                    <div className="grid gap-4 sm:grid-cols-2">
-                                        {competencies.map((c) => {
-                                            const val = assessorScores[c.key];
-                                            return (
-                                                <div
-                                                    key={c.key}
-                                                    className="rounded-lg p-4"
-                                                    style={{ backgroundColor: tokens.parchmentWarm, border: `1px solid rgba(124,148,132,0.35)` }}
-                                                >
-                                                    <div className="flex items-center justify-between mb-3">
-                                                        <span className="text-sm font-medium" style={{ color: tokens.ink }}>
-                                                            {c.label}
-                                                        </span>
-                                                        <span
-                                                            className="text-xs px-2 py-0.5 rounded font-medium"
-                                                            style={{ fontFamily: "'IBM Plex Mono', monospace", backgroundColor: "rgba(63,90,69,0.12)", color: tokens.sageDark }}
+                                    {!isAssessor ? (
+                                        // Sprint 5 (per chị Lan's feedback): a student account can
+                                        // see this tab, but can't edit or submit it — only an
+                                        // "assessor" account can. No scores are shown at all, so
+                                        // there's nothing misleading to look at.
+                                        <div
+                                            className="flex items-center gap-2.5 rounded-lg px-4 py-4 mt-2"
+                                            style={{ backgroundColor: tokens.parchmentWarm, border: `1px dashed ${tokens.sage}` }}
+                                        >
+                                            <Lock size={14} style={{ color: tokens.sageDark, flexShrink: 0 }} />
+                                            <p className="text-sm font-medium" style={{ color: tokens.sageDark }}>
+                                                Only assessors can submit this section.
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <p className="text-sm mb-6" style={{ color: tokens.sageDark }}>
+                                                {isAssessorReadOnly
+                                                    ? "Completed by your supervisor or employer — read-only view."
+                                                    : "For supervisor or employer: rate the student, 1 to 5, across the six competencies."}
+                                            </p>
+
+                                            <div className="grid gap-4 sm:grid-cols-2">
+                                                {competencies.map((c) => {
+                                                    const val = assessorScores[c.key];
+                                                    return (
+                                                        <div
+                                                            key={c.key}
+                                                            className="rounded-lg p-4"
+                                                            style={{ backgroundColor: tokens.parchmentWarm, border: `1px solid rgba(124,148,132,0.35)` }}
                                                         >
-                                                            {val} / 5
-                                                        </span>
-                                                    </div>
-
-                                                    {isAssessorReadOnly ? (
-                                                        <div className="w-full h-2 rounded-full my-2" style={{ backgroundColor: "#D9DFD3" }}>
-                                                            <div className="h-2 rounded-full transition-all duration-300" style={{ width: `${(val / 5) * 100}%`, backgroundColor: tokens.sage }} />
-                                                        </div>
-                                                    ) : (
-                                                        <>
-                                                            <input
-                                                                type="range"
-                                                                min={1}
-                                                                max={5}
-                                                                step={1}
-                                                                value={val}
-                                                                onChange={(e) => setAssessorScores((s) => ({ ...s, [c.key]: Number(e.target.value) }))}
-                                                                className="diary-slider"
-                                                                style={{ "--thumb": tokens.sageDark, "--track": "rgba(124,148,132,0.35)" }}
-                                                            />
-                                                            <div className="flex justify-between mt-1.5">
-                                                                {[1, 2, 3, 4, 5].map((n) => (
-                                                                    <span key={n} className="text-xs font-mono" style={{ color: "#9BAF9E" }}>
-                                                                        {n}
-                                                                    </span>
-                                                                ))}
+                                                            <div className="flex items-center justify-between mb-3">
+                                                                <span className="text-sm font-medium" style={{ color: tokens.ink }}>
+                                                                    {c.label}
+                                                                </span>
+                                                                <span
+                                                                    className="text-xs px-2 py-0.5 rounded font-medium"
+                                                                    style={{ fontFamily: "'IBM Plex Mono', monospace", backgroundColor: "rgba(63,90,69,0.12)", color: tokens.sageDark }}
+                                                                >
+                                                                    {val} / 5
+                                                                </span>
                                                             </div>
-                                                        </>
+
+                                                            {isAssessorReadOnly ? (
+                                                                <div className="w-full h-2 rounded-full my-2" style={{ backgroundColor: "#D9DFD3" }}>
+                                                                    <div className="h-2 rounded-full transition-all duration-300" style={{ width: `${(val / 5) * 100}%`, backgroundColor: tokens.sage }} />
+                                                                </div>
+                                                            ) : (
+                                                                <>
+                                                                    <input
+                                                                        type="range"
+                                                                        min={1}
+                                                                        max={5}
+                                                                        step={1}
+                                                                        value={val}
+                                                                        onChange={(e) => setAssessorScores((s) => ({ ...s, [c.key]: Number(e.target.value) }))}
+                                                                        className="diary-slider"
+                                                                        style={{ "--thumb": tokens.sageDark, "--track": "rgba(124,148,132,0.35)" }}
+                                                                    />
+                                                                    <div className="flex justify-between mt-1.5">
+                                                                        {[1, 2, 3, 4, 5].map((n) => (
+                                                                            <span key={n} className="text-xs font-mono" style={{ color: "#9BAF9E" }}>
+                                                                                {n}
+                                                                            </span>
+                                                                        ))}
+                                                                    </div>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+
+                                            {!isAssessorReadOnly && (
+                                                <div className="no-print mt-6 flex items-center gap-4 flex-wrap">
+                                                    <button
+                                                        onClick={handleSaveAssessorScores}
+                                                        className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition hover:brightness-110"
+                                                        style={{ backgroundColor: tokens.sageDark, color: tokens.parchmentWarm }}
+                                                    >
+                                                        Save Assessor Scores
+                                                    </button>
+                                                    {assessorSaveStatus === "saved" && (
+                                                        <span className="text-xs font-medium" style={{ color: tokens.sageDark, fontFamily: "'IBM Plex Mono', monospace" }}>
+                                                            ✓ Assessor scores saved — radar chart updated.
+                                                        </span>
+                                                    )}
+                                                    {assessorSaveStatus && assessorSaveStatus.startsWith("error:") && (
+                                                        <span className="text-xs font-medium" style={{ color: tokens.wineDark, fontFamily: "'IBM Plex Mono', monospace" }}>
+                                                            ✕ {assessorSaveStatus.replace("error: ", "")}
+                                                        </span>
                                                     )}
                                                 </div>
-                                            );
-                                        })}
-                                    </div>
-
-                                    {!isAssessorReadOnly && (
-                                        <div className="no-print mt-6 flex items-center gap-4 flex-wrap">
-                                            <button
-                                                onClick={handleSaveAssessorScores}
-                                                className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition hover:brightness-110"
-                                                style={{ backgroundColor: tokens.sageDark, color: tokens.parchmentWarm }}
-                                            >
-                                                Save Assessor Scores
-                                            </button>
-                                            {assessorSaveStatus === "saved" && (
-                                                <span className="text-xs font-medium" style={{ color: tokens.sageDark, fontFamily: "'IBM Plex Mono', monospace" }}>
-                                                    ✓ Assessor scores saved — radar chart updated.
-                                                </span>
                                             )}
-                                            {assessorSaveStatus && assessorSaveStatus.startsWith("error:") && (
-                                                <span className="text-xs font-medium" style={{ color: tokens.wineDark, fontFamily: "'IBM Plex Mono', monospace" }}>
-                                                    ✕ {assessorSaveStatus.replace("error: ", "")}
-                                                </span>
-                                            )}
-                                        </div>
+                                        </>
                                     )}
                                 </section>
 
@@ -1955,20 +2039,31 @@
                                                 <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: tokens.dusk }} />
                                                 Self-Assessment
                                             </span>
-                                            <span className="flex items-center gap-1.5 text-xs font-medium" style={{ color: tokens.sageDark }}>
-                                                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: tokens.sageDark }} />
-                                                Assessor / Supervisor
-                                            </span>
+                                            {assessorHasSubmitted && (
+                                                <span className="flex items-center gap-1.5 text-xs font-medium" style={{ color: tokens.sageDark }}>
+                                                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: tokens.sageDark }} />
+                                                    Assessor / Supervisor
+                                                </span>
+                                            )}
                                         </div>
-                                        
+
                                         <div style={{ height: 320 }} className="relative">
                                             <RadarChart
                                                 selfScores={savedSelfScores}
                                                 assessorScores={savedAssessorScores}
                                                 competencies={competencies}
                                                 tokens={tokens}
+                                                showAssessor={assessorHasSubmitted}
                                             />
                                         </div>
+                                        {!assessorHasSubmitted && (
+                                            <p
+                                                className="no-print text-xs text-center mt-1"
+                                                style={{ fontFamily: "'IBM Plex Mono', monospace", color: tokens.inkSoft }}
+                                            >
+                                                No assessor score yet — this will show once an assessor submits one.
+                                            </p>
+                                        )}
                                         
                                         <p
                                             className="no-print text-xs text-center mt-4"
@@ -1988,6 +2083,90 @@
                                         )}
                                     </div>
                                 </section>
+
+                                {/* 05 — Pending Assessments (assessor-only) */}
+                                {isAssessor && (
+                                    <section ref={refMap.pending} className="mt-14 scroll-mt-10">
+                                        <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+                                            <SectionEyebrow no="05" label="Pending Assessments" accent={tokens.brass} accentDark={tokens.brassDark} />
+                                            <button
+                                                onClick={loadPendingReflections}
+                                                className="no-print text-xs font-medium px-3 py-1.5 rounded-full transition hover:bg-black/5"
+                                                style={{ backgroundColor: tokens.parchmentWarm, color: tokens.brassDark, border: `1px solid ${tokens.brass}` }}
+                                            >
+                                                {pendingLoading ? "Refreshing…" : "Refresh list"}
+                                            </button>
+                                        </div>
+                                        <p className="text-sm mb-6" style={{ color: tokens.inkSoft }}>
+                                            Every reflection you can see, so you know which ones still need your scores.
+                                        </p>
+
+                                        {pendingError && (
+                                            <p
+                                                className="text-xs mb-4"
+                                                style={{ fontFamily: "'IBM Plex Mono', monospace", color: tokens.wineDark }}
+                                            >
+                                                Could not load the list: {pendingError}
+                                            </p>
+                                        )}
+
+                                        {!pendingError && pendingLoading && pendingReflections.length === 0 && (
+                                            <p className="text-sm" style={{ color: tokens.inkSoft }}>Loading…</p>
+                                        )}
+
+                                        {!pendingLoading && !pendingError && pendingReflections.length === 0 && (
+                                            <p className="text-sm" style={{ color: tokens.inkSoft }}>
+                                                No reflections found yet.
+                                            </p>
+                                        )}
+
+                                        <div className="flex flex-col gap-3">
+                                            {pendingReflections.map((r) => {
+                                                const hasAssessment = r.assessment_status === "assessed";
+                                                const studentLabel = r.user?.name || r.user?.email || r.user_id || "Unknown student";
+                                                return (
+                                                    <div
+                                                        key={r.id}
+                                                        className="rounded-lg p-4 flex items-center justify-between flex-wrap gap-3"
+                                                        style={{ backgroundColor: tokens.parchmentWarm, border: `1px solid ${tokens.rule}` }}
+                                                    >
+                                                        <div>
+                                                            <p className="text-sm font-medium" style={{ color: tokens.ink }}>
+                                                                Reflection #{r.id} — {studentLabel}
+                                                            </p>
+                                                            <p className="text-xs mt-0.5" style={{ color: tokens.inkSoft, fontFamily: "'IBM Plex Mono', monospace" }}>
+                                                                {r.comment ? r.comment.slice(0, 80) : "No written reflection"}
+                                                            </p>
+                                                        </div>
+                                                        <div className="flex items-center gap-3">
+                                                            <span
+                                                                className="text-xs font-medium px-2.5 py-1 rounded-full"
+                                                                style={
+                                                                    hasAssessment
+                                                                        ? { backgroundColor: "rgba(124,148,132,0.18)", color: tokens.sageDark }
+                                                                        : { backgroundColor: "rgba(184,134,59,0.18)", color: tokens.brassDark }
+                                                                }
+                                                            >
+                                                                {hasAssessment ? "Reviewed" : "Pending"}
+                                                            </span>
+                                                            <button
+                                                                onClick={() => {
+                                                                    setCurrentReflectionId(r.id);
+                                                                    try { localStorage.setItem("alumableCurrentReflectionId", r.id); } catch (error) {}
+                                                                    scrollTo("assessor");
+                                                                }}
+                                                                className="text-xs font-medium px-3 py-1.5 rounded-md transition hover:brightness-110"
+                                                                style={{ backgroundColor: tokens.sageDark, color: tokens.parchmentWarm }}
+                                                            >
+                                                                Open to score
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </section>
+                                )}
                             </div>
                         </div>
                     </div>
