@@ -322,6 +322,73 @@ class ReflectionApiTest extends TestCase
 
     // ---------- Response performance ----------
 
+    // ---------- Sprint 6: assessed vs pending ----------
+
+    public function test_list_shows_whether_each_reflection_is_assessed_or_pending(): void
+    {
+        $assessed = Reflection::factory()->create();
+        $pending  = Reflection::factory()->create();
+        \App\Models\Assessment::factory()->create(['reflection_id' => $assessed->id]);
+
+        $response = $this->getJson('/api/reflections');
+
+        $response->assertStatus(200);
+        $byId = collect($response->json('data'))->keyBy('id');
+        $this->assertSame('assessed', $byId[$assessed->id]['assessment_status']);
+        $this->assertSame('pending',  $byId[$pending->id]['assessment_status']);
+        $this->assertArrayNotHasKey('assessments_exists', $byId[$pending->id]);
+    }
+
+    public function test_can_filter_to_only_pending_reflections(): void
+    {
+        $assessed = Reflection::factory()->create();
+        Reflection::factory()->count(2)->create();
+        \App\Models\Assessment::factory()->create(['reflection_id' => $assessed->id]);
+
+        $response = $this->getJson('/api/reflections?status=pending');
+
+        $response->assertStatus(200)->assertJsonCount(2, 'data')->assertJsonPath('meta.total', 2);
+        $this->assertTrue(collect($response->json('data'))->every(fn ($r) => $r['assessment_status'] === 'pending'));
+    }
+
+    public function test_can_filter_to_only_assessed_reflections(): void
+    {
+        $assessed = Reflection::factory()->create();
+        Reflection::factory()->count(2)->create();
+        \App\Models\Assessment::factory()->count(2)->create(['reflection_id' => $assessed->id]);
+
+        $response = $this->getJson('/api/reflections?status=assessed');
+
+        // Two assessments on one reflection still counts as one reflection
+        $response->assertStatus(200)->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $assessed->id);
+    }
+
+    public function test_rejects_an_invalid_status_filter(): void
+    {
+        $this->getJson('/api/reflections?status=done')
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['status']);
+    }
+
+    public function test_single_reflection_says_pending_before_it_is_assessed(): void
+    {
+        $reflection = Reflection::factory()->create();
+
+        $this->getJson("/api/reflections/{$reflection->id}")
+            ->assertStatus(200)
+            ->assertJsonPath('data.assessment_status', 'pending');
+    }
+
+    public function test_single_reflection_says_assessed_once_it_has_a_score(): void
+    {
+        $reflection = Reflection::factory()->create();
+        \App\Models\Assessment::factory()->create(['reflection_id' => $reflection->id]);
+
+        $this->getJson("/api/reflections/{$reflection->id}")
+            ->assertStatus(200)
+            ->assertJsonPath('data.assessment_status', 'assessed');
+    }
+
     // ---------- Sprint 5: authentication & ownership ----------
 
     public function test_guest_cannot_create_a_reflection(): void
