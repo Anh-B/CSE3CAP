@@ -15,6 +15,12 @@ class Assessment extends Model
         'scores' => 'array',
     ];
 
+    // The assessor who wrote this assessment
+    public function assessor()
+    {
+        return $this->belongsTo(User::class, 'assessor_id');
+    }
+
     // The reflection this assessment is scoring
     public function reflection()
     {

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Assessment;
 use App\Models\Reflection;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -612,6 +613,53 @@ class ReflectionApiTest extends TestCase
     {
         Reflection::factory()->create(['user_id' => $this->user->id, 'gig_title' => 'Mine']);
         Reflection::factory()->create(['gig_title' => 'Someone elses']);
+
+        $response = $this->get('/api/journal/export');
+
+        $response->assertStatus(200);
+        $this->assertStringStartsWith('%PDF', $response->getContent());
+    }
+
+    public function test_the_pdf_view_shows_the_assessor_scores_and_feedback(): void
+    {
+        $assessor = User::factory()->assessor()->create(['name' => 'Dr Marker']);
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
+        Assessment::factory()->create([
+            'reflection_id' => $reflection->id,
+            'assessor_id'   => $assessor->id,
+            'score'         => 4,
+            'feedback'      => 'Strong teamwork shown.',
+            'scores'        => [
+                'contribution' => 5, 'communication' => 4, 'collaboration' => 3,
+                'agile' => 2, 'continuous' => 4, 'leadership' => 1,
+            ],
+        ]);
+
+        $html = view('journal.export', ['reflections' => Reflection::with('assessments.assessor')->get()])->render();
+
+        $this->assertStringContainsString('Assessor Feedback', $html);
+        $this->assertStringContainsString('Dr Marker', $html);
+        $this->assertStringContainsString('Strong teamwork shown.', $html);
+        $this->assertStringContainsString('Leadership', $html);
+        $this->assertStringNotContainsString('Not assessed yet.', $html);
+    }
+
+    public function test_the_pdf_view_says_not_assessed_yet_when_there_is_no_assessment(): void
+    {
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
+
+        $html = view('journal.export', ['reflections' => collect([$reflection])])->render();
+
+        $this->assertStringContainsString('Not assessed yet.', $html);
+    }
+
+    public function test_the_pdf_export_still_works_when_an_entry_has_been_assessed(): void
+    {
+        $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
+        Assessment::factory()->create([
+            'reflection_id' => $reflection->id,
+            'assessor_id'   => User::factory()->assessor()->create()->id,
+        ]);
 
         $response = $this->get('/api/journal/export');
 
