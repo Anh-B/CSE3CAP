@@ -104,6 +104,52 @@
 
         @endif
 
+        @php($assessment = $reflection->assessments->first())
+
+        <h3>Assessor Feedback</h3>
+
+        @if ($assessment)
+
+            <div class="score-list">
+
+                @if ($assessment->assessor)
+                    <p>
+                        <strong>Assessed by:</strong>
+                        {{ $assessment->assessor->name }}
+                    </p>
+                @endif
+
+                <p>
+                    <strong>Overall Score:</strong>
+                    {{ $assessment->score }}/5
+                </p>
+
+                @if ($assessment->scores)
+
+                    <p><strong>Contribution:</strong> {{ $assessment->scores['contribution'] ?? '-' }}/5</p>
+                    <p><strong>Communication:</strong> {{ $assessment->scores['communication'] ?? '-' }}/5</p>
+                    <p><strong>Collaboration:</strong> {{ $assessment->scores['collaboration'] ?? '-' }}/5</p>
+                    <p><strong>Agile Improvement:</strong> {{ $assessment->scores['agile'] ?? '-' }}/5</p>
+                    <p><strong>Continuous Improvement:</strong> {{ $assessment->scores['continuous'] ?? '-' }}/5</p>
+                    <p><strong>Leadership & Initiative:</strong> {{ $assessment->scores['leadership'] ?? '-' }}/5</p>
+
+                @endif
+
+                @if ($assessment->feedback)
+                    <p>
+                        <strong>Feedback:</strong><br>
+                        {{ $assessment->feedback }}
+                    </p>
+                @endif
+
+            </div>
+
+        @else
+
+            <p>Not assessed yet.</p>
+
+        @endif
+
         <p class="date">
             Created:
             {{ $reflection->created_at }}
