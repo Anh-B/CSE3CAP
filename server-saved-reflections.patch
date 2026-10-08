@@ -1,0 +1,1105 @@
+diff --git a/app/Http/Controllers/EvidenceController.php b/app/Http/Controllers/EvidenceController.php
+index 09d617d..b8c5bc8 100644
+--- a/app/Http/Controllers/EvidenceController.php
++++ b/app/Http/Controllers/EvidenceController.php
+@@ -15,6 +15,17 @@ class EvidenceController extends Controller
+     // File types students can attach as evidence
+     const ALLOWED_TYPES = 'pdf,doc,docx,ppt,pptx,xls,xlsx,txt,csv,png,jpg,jpeg,gif,webp,zip';
+ 
++    /**
++     * The owner of a reflection (and any assessor) can view its evidence.
++     */
++    private function canAccess(Reflection $reflection): bool
++    {
++        $user = auth()->user();
++
++        return $user->role === 'assessor'
++            || (int) $reflection->user_id === (int) $user->id;
++    }
++
+     /**
+      * Attach evidence to a reflection.
+      * Send either a `file` (multipart upload) or a `link` - not both.
+@@ -101,6 +112,14 @@ public function index($id)
+             ], 404);
+         }
+ 
++        // Only the owner or an assessor can see what was attached
++        if (!$this->canAccess($reflection)) {
++            return response()->json([
++                'success' => false,
++                'message' => 'You can only view evidence on your own reflections.'
++            ], 403);
++        }
++
+         return response()->json([
+             'success' => true,
+             'data'    => $reflection->evidence()->latest()->get()
+@@ -121,6 +140,14 @@ public function download($id)
+             ], 404);
+         }
+ 
++        // Only the owner of the reflection or an assessor can download it
++        if (!$this->canAccess($evidence->reflection)) {
++            return response()->json([
++                'success' => false,
++                'message' => 'You can only download evidence on your own reflections.'
++            ], 403);
++        }
++
+         if ($evidence->type !== 'file' || !Storage::exists($evidence->file_path)) {
+             return response()->json([
+                 'success' => false,
+diff --git a/app/Http/Controllers/ReflectionController.php b/app/Http/Controllers/ReflectionController.php
+index 9b51982..ce65e07 100644
+--- a/app/Http/Controllers/ReflectionController.php
++++ b/app/Http/Controllers/ReflectionController.php
+@@ -12,7 +12,11 @@ public function store(Request $request)
+         // 1. Validate request data
+         $validated = $request->validate([
+             'score'                 => 'required|integer|min:1|max:5',
+-            'comment'               => 'nullable|string|max:1000',
++            'comment'               => 'nullable|string|max:5000',
++            // Title and category of the journal entry, so the entry list can
++            // be rebuilt from the server on any device.
++            'gig_title'             => 'nullable|string|max:255',
++            'category'              => 'nullable|string|max:100',
+             // Optional per-competency scores that feed the radar chart.
+             // Kept separate from the overall `score` above so existing
+             // clients that only send `score` keep working unchanged.
+@@ -28,17 +32,19 @@ public function store(Request $request)
+             'score.integer'  => 'The score must be an integer.',
+             'score.min'      => 'The self-review score must be at least 1.',
+             'score.max'      => 'The self-review score may not be greater than 5.',
+-            'comment.max'    => 'The comment may not be greater than 1000 characters.',
++            'comment.max'    => 'The comment may not be greater than 5000 characters.',
+         ]);
+ 
+         // 2. Save the reflection entry to the database
+         // auth()->id() is always set here - this route sits behind
+         // the auth:sanctum middleware group, so there's no anonymous case.
+         $reflection = Reflection::create([
+-            'user_id' => auth()->id(),
+-            'score'   => $validated['score'],
+-            'comment' => $validated['comment'] ?? null,
+-            'scores'  => $validated['scores'] ?? null,
++            'user_id'   => auth()->id(),
++            'gig_title' => $validated['gig_title'] ?? null,
++            'category'  => $validated['category'] ?? null,
++            'score'     => $validated['score'],
++            'comment'   => $validated['comment'] ?? null,
++            'scores'    => $validated['scores'] ?? null,
+         ]);
+ 
+         // 3. Return success response
+@@ -49,10 +55,23 @@ public function store(Request $request)
+         ], 201);
+     }
+ 
++    /**
++     * The owner of a reflection can view it, and so can any assessor.
++     */
++    private function canView(Reflection $reflection): bool
++    {
++        $user = auth()->user();
++
++        return $user->role === 'assessor'
++            || (int) $reflection->user_id === (int) $user->id;
++    }
++
+     public function index(Request $request)
+     {
+-        // Any logged-in user can list reflections, since assessors need to
+-        // browse everyone's to find ones to score.
++        // Students only ever see their own reflections. Assessors see
++        // everyone's, since they need to browse them to find ones to score.
++        // Add ?mine=1 to get only your own (the journal page uses this so
++        // an assessor's own list is not filled with other people's entries).
+         //
+         // Paginated so the response stays fast as the table grows.
+         // Clients can pass ?per_page=20&page=2.
+@@ -69,7 +88,12 @@ public function index(Request $request)
+         $perPage = (int) $request->query('per_page', 15);
+         $perPage = min(max($perPage, 1), 100); // clamp to 1-100
+ 
+-        $query = Reflection::latest()->withExists('assessments');
++        $query = Reflection::latest()->with(['evidence', 'user:id,name,email'])->withExists('assessments');
++
++        $user = $request->user();
++        if ($user->role !== 'assessor' || $request->boolean('mine')) {
++            $query->where('user_id', $user->id);
++        }
+ 
+         if ($request->query('status') === 'pending') {
+             $query->whereDoesntHave('assessments');
+@@ -119,7 +143,15 @@ public function show($id)
+             ], 404);
+         }
+ 
+-        // 3. Return the entry. assessment_status matches the list
++        // 3. Students can only open their own entries; assessors can open any
++        if (!$this->canView($reflection)) {
++            return response()->json([
++                'success' => false,
++                'message' => 'You can only view your own reflections.'
++            ], 403);
++        }
++
++        // 4. Return the entry. assessment_status matches the list
+         // endpoint: 'assessed' once an assessor has scored it, otherwise
+         // 'pending', so the page can show which state it's in.
+         $data = $reflection->toArray();
+@@ -158,7 +190,9 @@ public function update(Request $request, $id)
+         // 4. Validate input data
+         $validated = $request->validate([
+             'score'                 => 'sometimes|required|integer|min:1|max:5',
+-            'comment'               => 'nullable|string|max:1000',
++            'comment'               => 'nullable|string|max:5000',
++            'gig_title'             => 'nullable|string|max:255',
++            'category'              => 'nullable|string|max:100',
+             'scores'                    => 'nullable|array',
+             'scores.contribution'      => 'required_with:scores|integer|min:1|max:5',
+             'scores.communication'     => 'required_with:scores|integer|min:1|max:5',
+@@ -170,7 +204,7 @@ public function update(Request $request, $id)
+             'score.integer' => 'The score must be an integer.',
+             'score.min'     => 'The self-review score must be at least 1.',
+             'score.max'     => 'The self-review score may not be greater than 5.',
+-            'comment.max'   => 'The comment may not exceed 1000 characters.'
++            'comment.max'   => 'The comment may not exceed 5000 characters.'
+         ]);
+ 
+         // 5. Update the database record
+diff --git a/app/Models/Reflection.php b/app/Models/Reflection.php
+index 7455553..031c9fc 100644
+--- a/app/Models/Reflection.php
++++ b/app/Models/Reflection.php
+@@ -8,7 +8,7 @@
+ class Reflection extends Model
+ {
+     use HasFactory;
+-    protected $fillable = ['user_id', 'score', 'comment', 'scores'];
++    protected $fillable = ['user_id', 'gig_title', 'category', 'score', 'comment', 'scores'];
+ 
+     protected $casts = [
+         'scores' => 'array',
+@@ -23,6 +23,12 @@ protected static function booted(): void
+         });
+     }
+ 
++    // The student who wrote this reflection
++    public function user()
++    {
++        return $this->belongsTo(User::class);
++    }
++
+     // Assessor feedback left on this reflection (assessments.reflection_id)
+     public function assessments()
+     {
+diff --git a/database/migrations/2026_10_08_000000_add_title_and_category_to_reflections_table.php b/database/migrations/2026_10_08_000000_add_title_and_category_to_reflections_table.php
+new file mode 100644
+index 0000000..89b22b9
+--- /dev/null
++++ b/database/migrations/2026_10_08_000000_add_title_and_category_to_reflections_table.php
+@@ -0,0 +1,35 @@
++<?php
++
++use Illuminate\Database\Migrations\Migration;
++use Illuminate\Database\Schema\Blueprint;
++use Illuminate\Support\Facades\Schema;
++
++return new class extends Migration
++{
++    /**
++     * Run the migrations.
++     *
++     * Lets the server keep the title and category of each journal entry,
++     * not only its scores and comment. Without these, the "Saved Reflection
++     * Entries" list could only live in the browser, so a student who logged
++     * in on another device saw nothing. Both are optional so reflections
++     * created before this migration keep working (they show as untitled).
++     */
++    public function up(): void
++    {
++        Schema::table('reflections', function (Blueprint $table) {
++            $table->string('gig_title')->nullable()->after('user_id');
++            $table->string('category', 100)->nullable()->after('gig_title');
++        });
++    }
++
++    /**
++     * Reverse the migrations.
++     */
++    public function down(): void
++    {
++        Schema::table('reflections', function (Blueprint $table) {
++            $table->dropColumn(['gig_title', 'category']);
++        });
++    }
++};
+diff --git a/docs/API.md b/docs/API.md
+index d121cf6..48902f2 100644
+--- a/docs/API.md
++++ b/docs/API.md
+@@ -42,7 +42,7 @@ ## Logging in — new in Sprint 5
+ **Who can do what:**
+ - A student can only edit or delete their **own** reflections, and only add or remove evidence on their **own** reflections. Trying to touch someone else's gets a `403`.
+ - Only **assessor** accounts can submit an assessment (`POST /api/assessments`). A student gets a `403`.
+-- Reading (list and get-one, for both reflections and assessments) is open to any logged-in user, since assessors need to browse everyone's reflections to find ones to score.
++- A student can only **read** their own reflections and the evidence on them (list, get-one, evidence list and download return only their own; someone else's gets a `403`). **Assessors** can read everyone's, since they need to browse them to find ones to score. Add `?mine=1` to the list to get only your own, even as an assessor.
+ 
+ **Getting an assessor account:** sign-up can't create one. The team creates them from Railway (CSE3CAP service → **Console** tab):
+ ```
+@@ -63,7 +63,7 @@ ## The 6 competencies
+ ## Reflections (the student's side)
+ 
+ **Create** — `POST /api/reflections`
+-Send `score` (1–5, required), `comment` (optional, max 1000 characters), and `scores` (optional). Returns the saved entry with a `201`.
++Send `score` (1–5, required), `comment` (optional, max 5000 characters), `gig_title` (optional, max 255), `category` (optional, max 100) and `scores` (optional). The title and category let the journal's entry list be rebuilt from the server in any browser. Returns the saved entry with a `201`.
+ 
+ **List** — `GET /api/reflections`
+ Newest first, 15 per page. Use `?per_page=20&page=2` to change that (max 100 per page). The `meta` part of the response tells you the total and how many pages there are.
+diff --git a/public/reflection_diary.html b/public/reflection_diary.html
+index 8a08851..1fa8ef2 100644
+--- a/public/reflection_diary.html
++++ b/public/reflection_diary.html
+@@ -225,8 +225,8 @@
+             // Lists every reflection the logged-in user can see, so an
+             // assessor can tell which ones still need their scores.
+             // Matches ReflectionController@index: GET /api/reflections.
+-            async listReflections() {
+-                const res = await fetch(`${API_BASE_URL}/reflections`, {
++            async listReflections(query = "") {
++                const res = await fetch(`${API_BASE_URL}/reflections${query}`, {
+                     headers: authHeaders(),
+                 });
+                 return parseJsonResponse(res, "listReflections");
+@@ -254,11 +254,39 @@
+                     body: JSON.stringify({
+                         score: averageScore(payload.scores),
+                         comment: payload.reflection || null,
++                        gig_title: payload.gigTitle || null,
++                        category: payload.category || null,
+                         scores: payload.scores || null,
+                     }),
+                 });
+                 return parseJsonResponse(res, "saveReflectionEntry");
+             },
++            // Deletes a reflection (and its evidence) from the server.
++            // Matches ReflectionController@destroy: DELETE /api/reflections/{id}.
++            async deleteReflection(reflectionId) {
++                const res = await fetch(`${API_BASE_URL}/reflections/${reflectionId}`, {
++                    method: "DELETE",
++                    headers: authHeaders(),
++                });
++                return parseJsonResponse(res, "deleteReflection");
++            },
++            // Downloads the logged-in user's own journal as a PDF.
++            // Matches JournalExportController@export: GET /api/journal/export.
++            async exportJournal() {
++                const headers = {};
++                if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
++                const res = await fetch(`${API_BASE_URL}/journal/export`, { headers });
++                if (!res.ok) throw new Error("Could not export the journal.");
++                const blob = await res.blob();
++                const url = URL.createObjectURL(blob);
++                const a = document.createElement("a");
++                a.href = url;
++                a.download = "reflection-journal.pdf";
++                document.body.appendChild(a);
++                a.click();
++                a.remove();
++                URL.revokeObjectURL(url);
++            },
+             // Saves the student's self-assessment competency scores by
+             // creating/updating a reflection entry that carries them.
+             // Matches ReflectionController@store / @update.
+@@ -513,21 +541,37 @@ <h2 className="text-lg font-medium flex items-center gap-2" style={{ color: toke
+             // (and, in turn, the assessor scores) are saved against. Kept in
+             // localStorage too so the radar chart still knows which
+             // reflection to update after a page refresh.
+-            const [currentReflectionId, setCurrentReflectionId] = useState(() => {
+-                try {
+-                    return localStorage.getItem("alumableCurrentReflectionId") || null;
+-                } catch (error) {
+-                    return null;
+-                }
+-            });
++            // Not stored in the browser any more: every login starts with
++            // a clean radar chart, and opening a saved reflection from the
++            // list loads that reflection's own scores from the server.
++            const [currentReflectionId, setCurrentReflectionId] = useState(null);
+ 
+             const [entryForms, setEntryForms] = useState(() => [makeBlankEntryForm()]);
+-            const [entries, setEntries] = useState(() => {
+-                try {
+-                    return JSON.parse(localStorage.getItem("alumableReflectionEntries") || "[]");
+-                } catch (error) {
+-                    return [];
+-                }
++            // The saved-entry list lives on the server (one reflection per
++            // entry) and is loaded again after every login, so the same
++            // account sees the same entries in any browser.
++            const [entries, setEntries] = useState([]);
++            const [entriesLoading, setEntriesLoading] = useState(false);
++            const [entriesError, setEntriesError] = useState(null);
++
++            // Turns a reflection returned by the API into a list entry.
++            const entryFromServer = (r) => ({
++                id: String(r.id),
++                serverId: r.id,
++                gigTitle: r.gig_title || "Untitled reflection",
++                category: r.category || "Other",
++                reflection: r.comment || "",
++                attachments: (r.evidence || []).map((ev) => ({
++                    id: `ev-${ev.id}`,
++                    evidenceId: ev.id,
++                    name: ev.original_name || "file",
++                    size: ev.size,
++                    type: (ev.mime_type || "").includes("pdf") ? "pdf" : "txt",
++                    uploaded: true,
++                })),
++                scores: r.scores || null,
++                entryDate: r.created_at,
++                updatedAt: r.updated_at,
+             });
+ 
+             // Saved-entry list controls: search, category filter and sorting
+@@ -578,7 +622,31 @@ <h2 className="text-lg font-medium flex items-center gap-2" style={{ color: toke
+             const [registerError, setRegisterError] = useState(null);
+             const [registerLoading, setRegisterLoading] = useState(false);
+ 
++            // Clears everything that belongs to the previous user so one
++            // account's data never shows up under another login.
++            const resetWorkspace = () => {
++                setEntries([]);
++                setEntriesError(null);
++                setEntryForms([makeBlankEntryForm()]);
++                setScores(blankScores());
++                setSavedSelfScores(blankScores());
++                setAssessorScores(assessorDefaultScores);
++                setSavedAssessorScores(assessorDefaultScores);
++                setCurrentReflectionId(null);
++                setAssessmentStatus(null);
++                setAssessorHasSubmitted(false);
++                setPendingReflections([]);
++                setRadarLoadError(null);
++                setSearchTerm("");
++                setCategoryFilter("All");
++                try {
++                    localStorage.removeItem("alumableCurrentReflectionId");
++                    localStorage.removeItem("alumableReflectionEntries");
++                } catch (error) {}
++            };
++
+             const applyLoggedInSession = (token, user) => {
++                resetWorkspace();
+                 setStoredAuthToken(token);
+                 setAuthTokenState(token);
+                 setAuthUser(user || null);
+@@ -632,6 +700,7 @@ <h2 className="text-lg font-medium flex items-center gap-2" style={{ color: toke
+             };
+ 
+             const handleLogout = () => {
++                resetWorkspace();
+                 setStoredAuthToken(null);
+                 setAuthTokenState(null);
+                 setAuthUser(null);
+@@ -667,10 +736,29 @@ <h2 className="text-lg font-medium flex items-center gap-2" style={{ color: toke
+             // eslint-disable-next-line react-hooks/exhaustive-deps
+             }, [isAssessor, authTokenState]);
+ 
+-            // Sync entries with LocalStorage
++            // Load this user's own saved reflections from the server
++            // whenever someone is logged in (also after a page refresh).
++            // ?mine=1 keeps an assessor's own list free of other people's.
+             useEffect(() => {
+-                localStorage.setItem("alumableReflectionEntries", JSON.stringify(entries));
+-            }, [entries]);
++                if (!authTokenState) return;
++                let cancelled = false;
++                setEntriesLoading(true);
++                setEntriesError(null);
++                api.listReflections("?mine=1&per_page=100")
++                    .then((res) => {
++                        if (cancelled) return;
++                        const list = Array.isArray(res?.data) ? res.data : [];
++                        setEntries(list.map(entryFromServer));
++                    })
++                    .catch((error) => {
++                        if (!cancelled) setEntriesError(error.message);
++                    })
++                    .finally(() => {
++                        if (!cancelled) setEntriesLoading(false);
++                    });
++                return () => { cancelled = true; };
++            // eslint-disable-next-line react-hooks/exhaustive-deps
++            }, [authTokenState]);
+ 
+             // Sprint 5: rebuild the radar chart from the live API on load
+             // (and again right after logging in), instead of trusting
+@@ -690,9 +778,10 @@ <h2 className="text-lg font-medium flex items-center gap-2" style={{ color: toke
+ 
+                         setAssessmentStatus(data.assessment_status || null);
+ 
+-                        if (data.scores) {
+-                            setScores({ ...blankScores(), ...data.scores });
+-                            setSavedSelfScores({ ...blankScores(), ...data.scores });
++                        {
++                            const own = { ...blankScores(), ...(data.scores || {}) };
++                            setScores(own);
++                            setSavedSelfScores(own);
+                         }
+ 
+                         const latestAssessment = (data.assessments || [])[data.assessments.length - 1];
+@@ -713,7 +802,7 @@ <h2 className="text-lg font-medium flex items-center gap-2" style={{ color: toke
+                         setRadarLoadError(error.message);
+                     });
+             // eslint-disable-next-line react-hooks/exhaustive-deps
+-            }, [authTokenState]);
++            }, [authTokenState, currentReflectionId]);
+ 
+             const updateEntryForm = (formId, field, value) => {
+                 setEntryForms((forms) =>
+@@ -795,6 +884,10 @@ <h2 className="text-lg font-medium flex items-center gap-2" style={{ color: toke
+             const addNewEntryForm = () => {
+                 const newForm = makeBlankEntryForm();
+                 setScores(blankScores());
++                setSavedSelfScores(blankScores());
++                setCurrentReflectionId(null);
++                setAssessmentStatus(null);
++                setAssessorHasSubmitted(false);
+                 setEntryForms([newForm]);
+ 
+                 setTimeout(() => {
+@@ -817,93 +910,75 @@ <h2 className="text-lg font-medium flex items-center gap-2" style={{ color: toke
+                     return;
+                 }
+ 
+-                const now = new Date();
+-                const entryId =
+-                    form.savedEntryId ||
+-                    `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
++                const existing = form.savedEntryId
++                    ? entries.find((entry) => entry.id === form.savedEntryId)
++                    : null;
+ 
+-                const previousEntry = entries.find((entry) => entry.id === entryId);
+-
+-                const savedEntry = {
+-                    id: entryId,
++                const payload = {
+                     gigTitle: form.gigTitle.trim(),
+                     category: form.category || "Other",
+                     reflection: form.reflection.trim(),
+-                    attachments: form.attachments || [],
+                     scores: { ...scores },
+-                    entryDate: previousEntry?.entryDate || now.toISOString(),
+-                    updatedAt: now.toISOString(),
+                 };
+ 
+-                // Update local storage / state
++                setFormStatus(formId, "Saving...");
++
++                let saved;
++                try {
++                    // POST creates a new reflection; PUT updates the one this
++                    // form was opened from.
++                    const res = await api.saveReflectionEntry(payload, existing?.serverId || null);
++                    saved = res?.data;
++                    if (!saved?.id) throw new Error("The server did not return an id.");
++                } catch (error) {
++                    setFormStatus(formId, `Could not save to the server: ${error.message}`);
++                    return;
++                }
++
++                // Upload any files that have not been sent yet.
++                let attachments = form.attachments || [];
++                const failed = [];
++                for (const attachment of attachments.filter((att) => att.file && !att.uploaded)) {
++                    try {
++                        const evidenceRes = await api.uploadEvidence(saved.id, attachment.file, payload.gigTitle);
++                        const evidence = evidenceRes?.data;
++                        attachments = attachments.map((att) =>
++                            att.id === attachment.id
++                                ? { ...att, uploaded: true, evidenceId: evidence?.id, file: null }
++                                : att
++                        );
++                    } catch (error) {
++                        failed.push(`"${attachment.name}" (${error.message})`);
++                    }
++                }
++
++                const savedEntry = {
++                    ...entryFromServer(saved),
++                    attachments,
++                    scores: payload.scores,
++                };
++
+                 setEntries((current) => {
+-                    const exists = current.some((entry) => entry.id === entryId);
++                    const exists = current.some((entry) => entry.id === savedEntry.id);
+                     return exists
+-                        ? current.map((entry) => (entry.id === entryId ? savedEntry : entry))
++                        ? current.map((entry) => (entry.id === savedEntry.id ? savedEntry : entry))
+                         : [savedEntry, ...current];
+                 });
+ 
+-                // Update Radar live snapshot
+                 setSavedSelfScores({ ...scores });
++                setCurrentReflectionId(saved.id);
++                if (!existing) setAssessmentStatus("pending");
++
++                const message = failed.length
++                    ? `Entry saved, but these files failed to upload: ${failed.join(", ")}`
++                    : createAnother
++                        ? "Entry saved. A new form has been created."
++                        : "Reflection entry & attachments saved to journal.";
+ 
+-                // Save to the backend (POST creates the reflection the
+-                // first time, PUT updates it after that) and remember its
+-                // id so the assessor's scores can be linked to it later.
+-                api.saveReflectionEntry(savedEntry, currentReflectionId)
+-                    .then(async (res) => {
+-                        const id = res?.data?.id;
+-                        if (!id) return;
+-                        
+-                        setCurrentReflectionId(id);
+-                        setAssessmentStatus((status) => status || "pending");
+-                        try {
+-                            localStorage.setItem("alumableCurrentReflectionId", id);
+-                        } catch (error) {}
+-
+-                    const currentForm = entryForms.find((item) => item.formId === formId);
+-                    const pending = (currentForm?.attachments || []).filter((att) => att.file && !att.uploaded);
+-
+-                    for (const attachment of pending) {
+-                        try {
+-                            const evidenceRes = await api.uploadEvidence(id, attachment.file, currentForm.gigTitle);
+-                            const evidence = evidenceRes?.data;
+-                            setEntryForms((forms) =>
+-                                forms.map((form) =>
+-                                    form.formId === formId
+-                                        ? {
+-                                            ...form,
+-                                            attachments: form.attachments.map((att) =>
+-                                                att.id === attachment.id
+-                                                    ? {
+-                                                        ...att,
+-                                                        uploaded: true,
+-                                                        evidenceId: evidence?.id,
+-                                                        file: null,
+-                                                        }
+-                                                    : att
+-                                            ),
+-                                        }
+-                                    :form
+-                                )
+-                            );
+-                        }  catch (error) {
+-                                setFormStatus(formId, `Entry saved, but "${attachment.name}" failed to upload: ${error.message}`);
+-                        }          
+-                    }
+-                })
+-                .catch((error) => {
+-                    setFormStatus(formId, `Saved locally, but the server rejected it: ${error.message}`);
+-                });
+                 setEntryForms((forms) =>
+                     forms.map((item) =>
+                         item.formId === formId
+-                            ? {
+-                                  ...item,
+-                                  savedEntryId: entryId,
+-                                  status: createAnother
+-                                      ? "Entry saved. A new form has been created."
+-                                      : "Reflection entry & attachments saved to journal.",
+-                              }
++                            ? { ...item, savedEntryId: savedEntry.id, attachments, status: message }
+                             : item
+                     )
+                 );
+@@ -911,11 +986,15 @@ <h2 className="text-lg font-medium flex items-center gap-2" style={{ color: toke
+                 if (createAnother) {
+                     addNewEntryForm();
+                 } else {
+-                    setTimeout(() => setFormStatus(formId, ""), 3500);
++                    setTimeout(() => setFormStatus(formId, ""), failed.length ? 8000 : 3500);
+                 }
+             };
+ 
+             const loadEntry = (entry) => {
++                // Remember which reflection is open so the radar chart and
++                // assessor tab load its own scores from the server.
++                setCurrentReflectionId(entry.serverId);
++
+                 const existingForm = entryForms.find(
+                     (form) => form.savedEntryId === entry.id
+                 );
+@@ -956,36 +1035,52 @@ <h2 className="text-lg font-medium flex items-center gap-2" style={{ color: toke
+                 setTimeout(() => setFormStatus(loadedForm.formId, ""), 3000);
+             };
+ 
+-            const deleteEntry = (entryId) => {
+-                setEntries((current) => current.filter((entry) => entry.id !== entryId));
++            const deleteEntry = async (entryId) => {
++                const entry = entries.find((item) => item.id === entryId);
++                if (!entry) return;
+ 
+-                setEntryForms((forms) => {
+-                    const deletedFormIsOpen = forms.some(
+-                        (form) => form.savedEntryId === entryId
+-                    );
+-                    return deletedFormIsOpen ? [makeBlankEntryForm()] : forms;
+-                });
++                try {
++                    await api.deleteReflection(entry.serverId);
++                } catch (error) {
++                    alert(`Could not delete this reflection from the server: ${error.message}`);
++                    return;
++                }
+ 
+-                const deletedEntry = entryForms.find((form) => form.savedEntryId === entryId);
+-                if (deletedEntry) {
++                setEntries((current) => current.filter((item) => item.id !== entryId));
++
++                const deletedFormIsOpen = entryForms.some((form) => form.savedEntryId === entryId);
++                if (deletedFormIsOpen) {
++                    setEntryForms([makeBlankEntryForm()]);
+                     setScores(blankScores());
++                    setSavedSelfScores(blankScores());
++                }
++                if (String(currentReflectionId) === entryId) {
++                    setCurrentReflectionId(null);
++                    setAssessmentStatus(null);
++                    setAssessorHasSubmitted(false);
+                 }
+             };
+ 
+             const handleSaveSelfScores = () => {
++                // Scores belong to a saved reflection, so one has to be open.
++                if (!currentReflectionId) {
++                    setSelfSaveStatus("error: Save or open a reflection in tab 01 first, then score it here.");
++                    setTimeout(() => setSelfSaveStatus(null), 4000);
++                    return;
++                }
++
+                 setSavedSelfScores({ ...scores });
+                 setSelfSaveStatus("saved");
+ 
+                 api.saveSelfScores(scores, currentReflectionId)
+-                    .then((res) => {
+-                        const id = res?.data?.id;
+-                        if (id) {
+-                            setCurrentReflectionId(id);
+-                            setAssessmentStatus((status) => status || "pending");
+-                            try {
+-                                localStorage.setItem("alumableCurrentReflectionId", id);
+-                            } catch (error) {}
+-                        }
++                    .then(() => {
++                        setEntries((current) =>
++                            current.map((entry) =>
++                                String(entry.serverId) === String(currentReflectionId)
++                                    ? { ...entry, scores: { ...scores } }
++                                    : entry
++                            )
++                        );
+                     })
+                     .catch((error) => {
+                         setSelfSaveStatus(`error: ${error.message}`);
+@@ -1009,7 +1104,7 @@ <h2 className="text-lg font-medium flex items-center gap-2" style={{ color: toke
+             };
+ 
+             const handleExportPDF = () => {
+-                window.print();
++                api.exportJournal().catch((error) => alert(error.message));
+             };
+ 
+             // Apply search + category filter + sorting to the saved entries list.
+@@ -1685,7 +1780,11 @@ <h2 className="text-lg font-medium flex items-center gap-2" style={{ color: toke
+ 
+                                         {entries.length === 0 ? (
+                                             <p className="text-sm" style={{ color: tokens.inkSoft }}>
+-                                                No entries saved yet. Reflections you save will appear here.
++                                                {entriesLoading
++                                                    ? "Loading your saved reflections..."
++                                                    : entriesError
++                                                        ? `Could not load your saved reflections: ${entriesError}`
++                                                        : "No entries saved yet. Reflections you save will appear here."}
+                                             </p>
+                                         ) : displayedEntries.length === 0 ? (
+                                             <div
+@@ -1759,10 +1858,13 @@ <h4 className="text-base font-semibold" style={{ color: tokens.ink }}>
+                                                                     {attachmentCount > 0 && (
+                                                                         <div className="mt-3 flex flex-wrap gap-2">
+                                                                             {entry.attachments.map((file) => (
+-                                                                                <a
++                                                                                <button
++                                                                                    type="button"
+                                                                                     key={file.id}
+-                                                                                    href={file.dataUrl}
+-                                                                                    download={file.name}
++                                                                                    onClick={() =>
++                                                                                        file.evidenceId &&
++                                                                                        api.downloadEvidence(file.evidenceId, file.name).catch((error) => alert(error.message))
++                                                                                    }
+                                                                                     className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium transition hover:underline"
+                                                                                     style={{
+                                                                                         backgroundColor: tokens.brassTint,
+@@ -1774,7 +1876,7 @@ <h4 className="text-base font-semibold" style={{ color: tokens.ink }}>
+                                                                                     <FileText size={11} />
+                                                                                     <span className="max-w-[160px] truncate">{file.name}</span>
+                                                                                     <Download size={10} />
+-                                                                                </a>
++                                                                                </button>
+                                                                             ))}
+                                                                         </div>
+                                                                     )}
+@@ -2152,7 +2254,6 @@ <h4 className="text-base font-semibold" style={{ color: tokens.ink }}>
+                                                             <button
+                                                                 onClick={() => {
+                                                                     setCurrentReflectionId(r.id);
+-                                                                    try { localStorage.setItem("alumableCurrentReflectionId", r.id); } catch (error) {}
+                                                                     scrollTo("assessor");
+                                                                 }}
+                                                                 className="text-xs font-medium px-3 py-1.5 rounded-md transition hover:brightness-110"
+diff --git a/resources/views/journal/export.blade.php b/resources/views/journal/export.blade.php
+index 1b31bcb..77b179b 100644
+--- a/resources/views/journal/export.blade.php
++++ b/resources/views/journal/export.blade.php
+@@ -46,7 +46,11 @@
+ 
+     <div class="entry">
+ 
+-        <h2>Reflection #{{ $reflection->id }}</h2>
++        <h2>{{ $reflection->gig_title ?: 'Reflection #' . $reflection->id }}</h2>
++
++        @if ($reflection->category)
++            <p class="date">Category: {{ $reflection->category }}</p>
++        @endif
+ 
+         <p>
+             <strong>Overall Score:</strong>
+diff --git a/tests/Feature/EvidenceApiTest.php b/tests/Feature/EvidenceApiTest.php
+index 90cebfc..fb38554 100644
+--- a/tests/Feature/EvidenceApiTest.php
++++ b/tests/Feature/EvidenceApiTest.php
+@@ -299,4 +299,40 @@ public function test_cannot_delete_evidence_on_another_students_reflection(): vo
+         $response->assertStatus(403);
+         $this->assertDatabaseHas('evidence', ['id' => $evidence->id]);
+     }
++
++    // ---------- Who can see evidence ----------
++
++    public function test_cannot_list_evidence_on_another_students_reflection(): void
++    {
++        $reflection = Reflection::factory()->create();
++
++        $this->getJson("/api/reflections/{$reflection->id}/evidence")
++            ->assertStatus(403)->assertJson(['success' => false]);
++    }
++
++    public function test_cannot_download_evidence_from_another_students_reflection(): void
++    {
++        $reflection = Reflection::factory()->create();
++        Storage::put('evidence/secret.txt', 'private notes');
++        $evidence = Evidence::create([
++            'reflection_id' => $reflection->id, 'type' => 'file', 'file_path' => 'evidence/secret.txt',
++            'original_name' => 'secret.txt', 'mime_type' => 'text/plain', 'size' => 13,
++        ]);
++
++        $this->get("/api/evidence/{$evidence->id}/download")->assertStatus(403);
++    }
++
++    public function test_an_assessor_can_list_and_download_a_students_evidence(): void
++    {
++        $reflection = Reflection::factory()->create();
++        Storage::put('evidence/notes.txt', 'sprint notes');
++        $evidence = Evidence::create([
++            'reflection_id' => $reflection->id, 'type' => 'file', 'file_path' => 'evidence/notes.txt',
++            'original_name' => 'notes.txt', 'mime_type' => 'text/plain', 'size' => 12,
++        ]);
++        Sanctum::actingAs(User::factory()->assessor()->create());
++
++        $this->getJson("/api/reflections/{$reflection->id}/evidence")->assertStatus(200)->assertJsonCount(1, 'data');
++        $this->get("/api/evidence/{$evidence->id}/download")->assertStatus(200)->assertDownload('notes.txt');
++    }
+ }
+diff --git a/tests/Feature/ReflectionApiTest.php b/tests/Feature/ReflectionApiTest.php
+index ac27d96..a407f46 100644
+--- a/tests/Feature/ReflectionApiTest.php
++++ b/tests/Feature/ReflectionApiTest.php
+@@ -29,6 +29,15 @@ protected function setUp(): void
+         Sanctum::actingAs($this->user);
+     }
+ 
++    // Logs in an assessor instead of the default student from setUp().
++    private function actAsAssessor(): User
++    {
++        $assessor = User::factory()->assessor()->create();
++        Sanctum::actingAs($assessor);
++
++        return $assessor;
++    }
++
+     // ---------- Happy path ----------
+ 
+     public function test_can_submit_a_valid_self_reflection_score(): void
+@@ -131,6 +140,7 @@ public function test_comment_is_optional(): void
+ 
+     public function test_can_list_reflections_most_recent_first(): void
+     {
++        $this->actAsAssessor(); // assessors see everyone's reflections
+         $older = Reflection::factory()->create(['created_at' => now()->subDay()]);
+         $newer = Reflection::factory()->create(['created_at' => now()]);
+ 
+@@ -171,11 +181,11 @@ public function test_rejects_non_integer_score(): void
+         $response->assertStatus(422)->assertJsonValidationErrors(['score']);
+     }
+ 
+-    public function test_rejects_comment_longer_than_1000_characters(): void
++    public function test_rejects_comment_longer_than_5000_characters(): void
+     {
+         $response = $this->postJson('/api/reflections', [
+             'score'   => 3,
+-            'comment' => str_repeat('a', 1001),
++            'comment' => str_repeat('a', 5001),
+         ]);
+ 
+         $response->assertStatus(422)->assertJsonValidationErrors(['comment']);
+@@ -185,6 +195,7 @@ public function test_rejects_comment_longer_than_1000_characters(): void
+ 
+     public function test_can_show_a_single_reflection_with_its_assessments(): void
+     {
++        $this->actAsAssessor(); // assessors see everyone's reflections
+         $reflection = Reflection::factory()->create([
+             'score'  => 4,
+             'scores' => $this->validCompetencyScores(),
+@@ -215,6 +226,7 @@ public function test_can_show_a_single_reflection_with_its_assessments(): void
+ 
+     public function test_show_returns_empty_assessments_when_none_exist(): void
+     {
++        $this->actAsAssessor(); // assessors see everyone's reflections
+         $reflection = Reflection::factory()->create();
+ 
+         $response = $this->getJson("/api/reflections/{$reflection->id}");
+@@ -290,12 +302,12 @@ public function test_update_rejects_non_integer_score(): void
+         $response->assertStatus(422)->assertJsonValidationErrors(['score']);
+     }
+ 
+-    public function test_update_rejects_comment_longer_than_1000_characters(): void
++    public function test_update_rejects_comment_longer_than_5000_characters(): void
+     {
+         $reflection = Reflection::factory()->create(['user_id' => $this->user->id]);
+ 
+         $response = $this->putJson("/api/reflections/{$reflection->id}", [
+-            'comment' => str_repeat('c', 1001),
++            'comment' => str_repeat('c', 5001),
+         ]);
+ 
+         $response->assertStatus(422)->assertJsonValidationErrors(['comment']);
+@@ -326,6 +338,7 @@ public function test_delete_returns_404_for_a_nonexistent_reflection(): void
+ 
+     public function test_list_shows_whether_each_reflection_is_assessed_or_pending(): void
+     {
++        $this->actAsAssessor(); // assessors see everyone's reflections
+         $assessed = Reflection::factory()->create();
+         $pending  = Reflection::factory()->create();
+         \App\Models\Assessment::factory()->create(['reflection_id' => $assessed->id]);
+@@ -341,6 +354,7 @@ public function test_list_shows_whether_each_reflection_is_assessed_or_pending()
+ 
+     public function test_can_filter_to_only_pending_reflections(): void
+     {
++        $this->actAsAssessor(); // assessors see everyone's reflections
+         $assessed = Reflection::factory()->create();
+         Reflection::factory()->count(2)->create();
+         \App\Models\Assessment::factory()->create(['reflection_id' => $assessed->id]);
+@@ -353,6 +367,7 @@ public function test_can_filter_to_only_pending_reflections(): void
+ 
+     public function test_can_filter_to_only_assessed_reflections(): void
+     {
++        $this->actAsAssessor(); // assessors see everyone's reflections
+         $assessed = Reflection::factory()->create();
+         Reflection::factory()->count(2)->create();
+         \App\Models\Assessment::factory()->count(2)->create(['reflection_id' => $assessed->id]);
+@@ -372,6 +387,7 @@ public function test_rejects_an_invalid_status_filter(): void
+ 
+     public function test_single_reflection_says_pending_before_it_is_assessed(): void
+     {
++        $this->actAsAssessor(); // assessors see everyone's reflections
+         $reflection = Reflection::factory()->create();
+ 
+         $this->getJson("/api/reflections/{$reflection->id}")
+@@ -381,6 +397,7 @@ public function test_single_reflection_says_pending_before_it_is_assessed(): voi
+ 
+     public function test_single_reflection_says_assessed_once_it_has_a_score(): void
+     {
++        $this->actAsAssessor(); // assessors see everyone's reflections
+         $reflection = Reflection::factory()->create();
+         \App\Models\Assessment::factory()->create(['reflection_id' => $reflection->id]);
+ 
+@@ -440,4 +457,165 @@ public function test_reflections_index_responds_quickly_with_many_rows(): void
+         $response->assertStatus(200);
+         $this->assertLessThan(500, $elapsedMs, 'GET /api/reflections took too long with 100 rows.');
+     }
++
++    // ---------- Journal entries saved on the server ----------
++
++    public function test_can_save_title_and_category_with_a_reflection(): void
++    {
++        $response = $this->postJson('/api/reflections', [
++            'score'     => 4,
++            'comment'   => 'Learned a lot about estimating.',
++            'gig_title' => 'Sprint 3 retro',
++            'category'  => 'Development',
++        ]);
++
++        $response->assertStatus(201)
++            ->assertJsonPath('data.gig_title', 'Sprint 3 retro')
++            ->assertJsonPath('data.category', 'Development');
++        $this->assertDatabaseHas('reflections', [
++            'user_id'   => $this->user->id,
++            'gig_title' => 'Sprint 3 retro',
++            'category'  => 'Development',
++        ]);
++    }
++
++    public function test_title_and_category_are_optional(): void
++    {
++        $this->postJson('/api/reflections', ['score' => 3])
++            ->assertStatus(201)
++            ->assertJsonPath('data.gig_title', null);
++    }
++
++    public function test_can_update_title_and_category(): void
++    {
++        $reflection = Reflection::factory()->create(['user_id' => $this->user->id, 'gig_title' => 'Old']);
++
++        $this->putJson("/api/reflections/{$reflection->id}", [
++            'gig_title' => 'New title',
++            'category'  => 'Research',
++        ])->assertStatus(200)->assertJsonPath('data.gig_title', 'New title');
++    }
++
++    public function test_rejects_a_title_longer_than_255_characters(): void
++    {
++        $this->postJson('/api/reflections', ['score' => 3, 'gig_title' => str_repeat('a', 256)])
++            ->assertStatus(422)->assertJsonValidationErrors(['gig_title']);
++    }
++
++    public function test_a_long_reflection_up_to_5000_characters_is_accepted(): void
++    {
++        $this->postJson('/api/reflections', ['score' => 3, 'comment' => str_repeat('a', 5000)])
++            ->assertStatus(201);
++    }
++
++    public function test_each_save_without_an_id_creates_a_separate_reflection(): void
++    {
++        $this->postJson('/api/reflections', ['score' => 3, 'gig_title' => 'First']);
++        $this->postJson('/api/reflections', ['score' => 4, 'gig_title' => 'Second']);
++
++        $this->assertSame(2, Reflection::where('user_id', $this->user->id)->count());
++    }
++
++    // ---------- Who can see which reflections ----------
++
++    public function test_a_student_only_lists_their_own_reflections(): void
++    {
++        $mine = Reflection::factory()->create(['user_id' => $this->user->id, 'gig_title' => 'Mine']);
++        Reflection::factory()->count(2)->create(); // belong to other students
++
++        $response = $this->getJson('/api/reflections');
++
++        $response->assertStatus(200)->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $mine->id);
++        $this->assertSame(1, $response->json('meta.total'));
++    }
++
++    public function test_the_list_includes_title_category_and_evidence(): void
++    {
++        $mine = Reflection::factory()->create([
++            'user_id' => $this->user->id, 'gig_title' => 'Mine', 'category' => 'Other',
++        ]);
++        \App\Models\Evidence::create([
++            'reflection_id' => $mine->id, 'type' => 'link', 'link' => 'https://example.com/a',
++        ]);
++
++        $this->getJson('/api/reflections')
++            ->assertStatus(200)
++            ->assertJsonPath('data.0.gig_title', 'Mine')
++            ->assertJsonPath('data.0.category', 'Other')
++            ->assertJsonCount(1, 'data.0.evidence');
++    }
++
++    public function test_an_assessor_lists_everyones_reflections(): void
++    {
++        Reflection::factory()->count(3)->create();
++        $this->actAsAssessor();
++
++        $this->getJson('/api/reflections')->assertStatus(200)->assertJsonCount(3, 'data');
++    }
++
++    public function test_an_assessor_can_ask_for_only_their_own_reflections(): void
++    {
++        Reflection::factory()->count(3)->create();
++        $assessor = $this->actAsAssessor();
++        $own = Reflection::factory()->create(['user_id' => $assessor->id]);
++
++        $this->getJson('/api/reflections?mine=1')
++            ->assertStatus(200)->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $own->id);
++    }
++
++    public function test_the_status_filter_still_only_covers_a_students_own_reflections(): void
++    {
++        Reflection::factory()->count(2)->create(); // other students, pending
++        $mine = Reflection::factory()->create(['user_id' => $this->user->id]);
++
++        $this->getJson('/api/reflections?status=pending')
++            ->assertStatus(200)->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $mine->id);
++    }
++
++    public function test_a_student_can_show_their_own_reflection(): void
++    {
++        $mine = Reflection::factory()->create(['user_id' => $this->user->id]);
++
++        $this->getJson("/api/reflections/{$mine->id}")->assertStatus(200)->assertJsonPath('data.id', $mine->id);
++    }
++
++    public function test_a_student_cannot_show_another_students_reflection(): void
++    {
++        $theirs = Reflection::factory()->create();
++
++        $this->getJson("/api/reflections/{$theirs->id}")->assertStatus(403)->assertJson(['success' => false]);
++    }
++
++    public function test_an_assessor_can_show_any_reflection(): void
++    {
++        $theirs = Reflection::factory()->create();
++        $this->actAsAssessor();
++
++        $this->getJson("/api/reflections/{$theirs->id}")->assertStatus(200)->assertJsonPath('data.id', $theirs->id);
++    }
++
++    // ---------- PDF export ----------
++
++    public function test_the_pdf_view_shows_the_entry_title_and_category(): void
++    {
++        $reflection = Reflection::factory()->create([
++            'user_id' => $this->user->id, 'gig_title' => 'Sprint 3 retro', 'category' => 'Development',
++        ]);
++
++        $html = view('journal.export', ['reflections' => collect([$reflection])])->render();
++
++        $this->assertStringContainsString('Sprint 3 retro', $html);
++        $this->assertStringContainsString('Development', $html);
++    }
++
++    public function test_the_pdf_export_returns_a_pdf_file(): void
++    {
++        Reflection::factory()->create(['user_id' => $this->user->id, 'gig_title' => 'Mine']);
++        Reflection::factory()->create(['gig_title' => 'Someone elses']);
++
++        $response = $this->get('/api/journal/export');
++
++        $response->assertStatus(200);
++        $this->assertStringStartsWith('%PDF', $response->getContent());
++    }
+ }
