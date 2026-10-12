@@ -1,6 +1,10 @@
 # Release Notes
 
-## [Unreleased](https://github.com/laravel/laravel/compare/TAG1...main)
+## [Unreleased](https://github.com/laravel/laravel/compare/2...main)
+
+## [2](https://github.com/laravel/laravel/compare/TAG1...2) - 2026-10-12
+
+updated release
 
 ## [TAG1](https://github.com/laravel/laravel/compare/v12.12.1...TAG1) - 2026-10-08
 
