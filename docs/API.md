@@ -111,10 +111,10 @@ Send `reflection_id` (required, has to be a real reflection), `score` (1–5, re
 Before Sprint 3 the assessor's `scores` were being quietly dropped — the column was in the database but never saved. That's fixed now.
 
 **List** — `GET /api/assessments` *(new in Sprint 3)*
-Same paging as reflections. Add `?reflection_id=5` to only get assessments for one reflection.
+Same paging as reflections. Add `?reflection_id=5` to only get assessments for one reflection. Assessors see all assessments; a student only sees assessments of their own reflections.
 
 **Get one** — `GET /api/assessments/{id}` *(new in Sprint 3)*
-Returns `404` if it doesn't exist.
+Returns `404` if it doesn't exist. A student requesting an assessment of someone else's reflection gets `403`.
 
 ---
 

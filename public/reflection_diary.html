@@ -222,6 +222,15 @@
                 });
                 return parseJsonResponse(res, "login");
             },
+            // Revokes this device's token on the server. Matches
+            // AuthController@logout: POST /api/logout.
+            async logout() {
+                const res = await fetch(`${API_BASE_URL}/logout`, {
+                    method: "POST",
+                    headers: authHeaders(),
+                });
+                return parseJsonResponse(res, "logout");
+            },
             // Lists every reflection the logged-in user can see, so an
             // assessor can tell which ones still need their scores.
             // Matches ReflectionController@index: GET /api/reflections.
@@ -306,7 +315,7 @@
             },
             // Saves the assessor's competency scores against a reflection.
             // Matches AssessmentController@store: POST /api/assessments.
-            async saveAssessorScores(scores, reflectionId) {
+            async saveAssessorScores(scores, reflectionId, feedback = "") {
                 if (!reflectionId) {
                     throw new Error("saveAssessorScores requires a reflectionId — save a self-assessment first.");
                 }
@@ -317,6 +326,7 @@
                         reflection_id: reflectionId,
                         score: averageScore(scores),
                         scores,
+                        feedback: feedback && feedback.trim() ? feedback.trim() : null,
                     }),
                 });
                 return parseJsonResponse(res, "saveAssessorScores");
@@ -536,6 +546,10 @@
             // "pending" until an assessor has scored this reflection, then
             // "assessed". Comes from the backend's assessment_status field.
             const [assessmentStatus, setAssessmentStatus] = useState(null);
+            // Written comment from the assessor (optional), saved with the scores.
+            const [assessorFeedback, setAssessorFeedback] = useState("");
+            // Pending Assessments list filter: "pending" | "reviewed" | "all".
+            const [pendingFilter, setPendingFilter] = useState("pending");
 
             // The backend reflection record that the self-assessment scores
             // (and, in turn, the assessor scores) are saved against. Kept in
@@ -635,6 +649,8 @@
                 setCurrentReflectionId(null);
                 setAssessmentStatus(null);
                 setAssessorHasSubmitted(false);
+                setAssessorFeedback("");
+                setPendingFilter("pending");
                 setPendingReflections([]);
                 setRadarLoadError(null);
                 setSearchTerm("");
@@ -700,6 +716,9 @@
             };
 
             const handleLogout = () => {
+                // Tell the server to revoke this device's token. Best effort:
+                // the user is signed out locally even if the call fails.
+                api.logout().catch(() => {});
                 resetWorkspace();
                 setStoredAuthToken(null);
                 setAuthTokenState(null);
@@ -712,10 +731,18 @@
             // it locked, per chị Lan's feedback.
             const isAssessor = authUser?.role === "assessor";
 
+            const pendingCount = pendingReflections.filter((r) => r.assessment_status !== "assessed").length;
+            const reviewedCount = pendingReflections.length - pendingCount;
+            const visiblePending = pendingReflections.filter((r) => {
+                if (pendingFilter === "pending") return r.assessment_status !== "assessed";
+                if (pendingFilter === "reviewed") return r.assessment_status === "assessed";
+                return true;
+            });
+
             const loadPendingReflections = () => {
                 setPendingLoading(true);
                 setPendingError(null);
-                api.listReflections()
+                api.listReflections("?per_page=100")
                     .then((res) => {
                         const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
                         setPendingReflections(list);
@@ -789,7 +816,9 @@
                             setAssessorScores({ ...assessorDefaultScores, ...latestAssessment.scores });
                             setSavedAssessorScores({ ...assessorDefaultScores, ...latestAssessment.scores });
                             setAssessorHasSubmitted(true);
+                            setAssessorFeedback(latestAssessment.feedback || "");
                         } else {
+                            setAssessorFeedback("");
                             // No real assessment on this reflection yet —
                             // the radar chart and tab 3 should not pretend
                             // there is one.
@@ -1094,8 +1123,13 @@
                 setAssessorSaveStatus("saved");
                 setAssessorHasSubmitted(true);
 
-                api.saveAssessorScores(assessorScores, currentReflectionId)
-                    .then(() => setAssessmentStatus("assessed"))
+                api.saveAssessorScores(assessorScores, currentReflectionId, assessorFeedback)
+                    .then(() => {
+                        setAssessmentStatus("assessed");
+                        // Refresh the Pending Assessments list so the status
+                        // badge changes without reloading the page.
+                        loadPendingReflections();
+                    })
                     .catch((error) => {
                         setAssessorSaveStatus(`error: ${error.message}`);
                     });
@@ -2094,6 +2128,30 @@
                                                 })}
                                             </div>
 
+                                            <div className="mt-6">
+                                                <label
+                                                    htmlFor="assessor-feedback"
+                                                    className="block text-sm font-medium mb-2"
+                                                    style={{ color: tokens.ink }}
+                                                >
+                                                    Written feedback (optional)
+                                                </label>
+                                                <textarea
+                                                    id="assessor-feedback"
+                                                    value={assessorFeedback}
+                                                    onChange={(e) => setAssessorFeedback(e.target.value.slice(0, 1000))}
+                                                    readOnly={isAssessorReadOnly}
+                                                    rows={4}
+                                                    maxLength={1000}
+                                                    placeholder="Comments for the student (up to 1000 characters)"
+                                                    className="w-full rounded-lg p-3 text-sm"
+                                                    style={{ backgroundColor: tokens.parchmentWarm, border: `1px solid rgba(124,148,132,0.35)`, color: tokens.ink }}
+                                                />
+                                                <p className="text-xs mt-1" style={{ color: tokens.inkSoft, fontFamily: "'IBM Plex Mono', monospace" }}>
+                                                    {assessorFeedback.length} / 1000
+                                                </p>
+                                            </div>
+
                                             {!isAssessorReadOnly && (
                                                 <div className="no-print mt-6 flex items-center gap-4 flex-wrap">
                                                     <button
@@ -2116,6 +2174,20 @@
                                                 </div>
                                             )}
                                         </>
+                                    )}
+
+                                    {!isAssessor && assessorFeedback && (
+                                        <div
+                                            className="rounded-lg p-4 mt-4"
+                                            style={{ backgroundColor: tokens.parchmentWarm, border: `1px solid rgba(124,148,132,0.35)` }}
+                                        >
+                                            <p className="text-sm font-medium mb-1" style={{ color: tokens.ink }}>
+                                                Assessor feedback
+                                            </p>
+                                            <p className="text-sm whitespace-pre-wrap" style={{ color: tokens.inkSoft }}>
+                                                {assessorFeedback}
+                                            </p>
+                                        </div>
                                     )}
                                 </section>
 
@@ -2216,14 +2288,44 @@
                                             <p className="text-sm" style={{ color: tokens.inkSoft }}>Loading…</p>
                                         )}
 
+                                        <div className="no-print flex items-center gap-2 flex-wrap mb-4">
+                                            {[
+                                                { key: "pending", label: `Pending (${pendingCount})` },
+                                                { key: "reviewed", label: `Reviewed (${reviewedCount})` },
+                                                { key: "all", label: `All (${pendingReflections.length})` },
+                                            ].map((f) => (
+                                                <button
+                                                    key={f.key}
+                                                    onClick={() => setPendingFilter(f.key)}
+                                                    aria-pressed={pendingFilter === f.key}
+                                                    className="text-xs font-medium px-3 py-1.5 rounded-full transition"
+                                                    style={
+                                                        pendingFilter === f.key
+                                                            ? { backgroundColor: tokens.brassDark, color: tokens.parchmentWarm, border: `1px solid ${tokens.brassDark}` }
+                                                            : { backgroundColor: tokens.parchmentWarm, color: tokens.brassDark, border: `1px solid ${tokens.brass}` }
+                                                    }
+                                                >
+                                                    {f.label}
+                                                </button>
+                                            ))}
+                                        </div>
+
                                         {!pendingLoading && !pendingError && pendingReflections.length === 0 && (
                                             <p className="text-sm" style={{ color: tokens.inkSoft }}>
                                                 No reflections found yet.
                                             </p>
                                         )}
 
+                                        {!pendingLoading && !pendingError && pendingReflections.length > 0 && visiblePending.length === 0 && (
+                                            <p className="text-sm" style={{ color: tokens.inkSoft }}>
+                                                {pendingFilter === "pending"
+                                                    ? "Nothing waiting for a score. Well done!"
+                                                    : "No reviewed reflections yet."}
+                                            </p>
+                                        )}
+
                                         <div className="flex flex-col gap-3">
-                                            {pendingReflections.map((r) => {
+                                            {visiblePending.map((r) => {
                                                 const hasAssessment = r.assessment_status === "assessed";
                                                 const studentLabel = r.user?.name || r.user?.email || r.user_id || "Unknown student";
                                                 return (

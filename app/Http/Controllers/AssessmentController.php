@@ -79,6 +79,12 @@ class AssessmentController extends Controller
 
         $query = Assessment::latest();
 
+        // Students only see assessments of their own reflections;
+        // assessors can see all of them.
+        if (auth()->user()->role !== 'assessor') {
+            $query->whereHas('reflection', fn ($q) => $q->where('user_id', auth()->id()));
+        }
+
         if ($request->filled('reflection_id')) {
             $query->where('reflection_id', $request->query('reflection_id'));
         }
@@ -109,6 +115,15 @@ class AssessmentController extends Controller
                 'success' => false,
                 'message' => 'Assessment not found.'
             ], 404);
+        }
+
+        // A student may only read assessments of their own reflections.
+        if (auth()->user()->role !== 'assessor'
+            && $assessment->reflection?->user_id !== auth()->id()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have access to this assessment.'
+            ], 403);
         }
 
         return response()->json([

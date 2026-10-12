@@ -620,6 +620,18 @@ class ReflectionApiTest extends TestCase
         $this->assertStringStartsWith('%PDF', $response->getContent());
     }
 
+    public function test_a_failed_pdf_export_does_not_leak_the_internal_error(): void
+    {
+        \Barryvdh\DomPDF\Facade\Pdf::shouldReceive('loadView')
+            ->andThrow(new \Exception('SECRET-INTERNAL-DETAIL /var/www/app'));
+
+        $response = $this->get('/api/journal/export');
+
+        $response->assertStatus(500);
+        $this->assertStringNotContainsString('SECRET-INTERNAL-DETAIL', $response->getContent());
+        $this->assertStringContainsString('Failed to export journal', $response->getContent());
+    }
+
     public function test_the_pdf_view_shows_the_assessor_scores_and_feedback(): void
     {
         $assessor = User::factory()->assessor()->create(['name' => 'Dr Marker']);
