@@ -133,7 +133,7 @@ class ReflectionController extends Controller
     public function show($id)
     {
         // 1. Find the reflection entry by ID, with its assessments and evidence
-        $reflection = Reflection::with(['assessments', 'evidence'])->find($id);
+        $reflection = Reflection::with(['assessments', 'evidence', 'user:id,name'])->find($id);
 
         // 2. Check if the entry exists (Edge case handling)
         if (!$reflection) {

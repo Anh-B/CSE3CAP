@@ -548,6 +548,9 @@
             const [assessmentStatus, setAssessmentStatus] = useState(null);
             // Written comment from the assessor (optional), saved with the scores.
             const [assessorFeedback, setAssessorFeedback] = useState("");
+            // The reflection currently open (its text, category, student and
+            // evidence), so an assessor can read it before scoring.
+            const [openReflection, setOpenReflection] = useState(null);
             // Pending Assessments list filter: "pending" | "reviewed" | "all".
             const [pendingFilter, setPendingFilter] = useState("pending");
 
@@ -650,6 +653,7 @@
                 setAssessmentStatus(null);
                 setAssessorHasSubmitted(false);
                 setAssessorFeedback("");
+                setOpenReflection(null);
                 setPendingFilter("pending");
                 setPendingReflections([]);
                 setRadarLoadError(null);
@@ -796,12 +800,17 @@
             // data instead of resetting to defaults. This needs a token,
             // since /reflections/{id} is now behind auth:sanctum.
             useEffect(() => {
-                if (!currentReflectionId || !authTokenState) return;
+                if (!currentReflectionId || !authTokenState) {
+                    setOpenReflection(null);
+                    return;
+                }
 
                 api.getReflection(currentReflectionId)
                     .then((res) => {
                         const data = res?.data;
                         if (!data) return;
+
+                        setOpenReflection(data);
 
                         setAssessmentStatus(data.assessment_status || null);
 
@@ -2054,6 +2063,67 @@
                                             </button>
                                         )}
                                     </div>
+
+                                    {isAssessor && (
+                                        <div
+                                            className="rounded-lg p-4 mb-5"
+                                            style={{ backgroundColor: tokens.parchmentWarm, border: `1px solid rgba(124,148,132,0.35)` }}
+                                        >
+                                            <p className="text-xs font-medium mb-2" style={{ color: tokens.sageDark, fontFamily: "'IBM Plex Mono', monospace" }}>
+                                                REFLECTION TO ASSESS
+                                            </p>
+                                            {!openReflection ? (
+                                                <p className="text-sm" style={{ color: tokens.inkSoft }}>
+                                                    Choose <strong>Open to score</strong> on a reflection in Pending Assessments to read it here.
+                                                </p>
+                                            ) : (
+                                                <>
+                                                    <p className="text-sm font-medium" style={{ color: tokens.ink }}>
+                                                        {openReflection.gig_title || "Untitled reflection"}
+                                                    </p>
+                                                    <p className="text-xs mt-0.5 mb-3" style={{ color: tokens.inkSoft }}>
+                                                        {(openReflection.user?.name ? `By ${openReflection.user.name} · ` : "")}
+                                                        {openReflection.category || "Uncategorised"}
+                                                    </p>
+                                                    <p className="text-sm whitespace-pre-wrap" style={{ color: tokens.ink }}>
+                                                        {openReflection.comment || "No written reflection."}
+                                                    </p>
+                                                    <div className="mt-3">
+                                                        <p className="text-xs font-medium mb-1.5" style={{ color: tokens.inkSoft }}>Evidence</p>
+                                                        {(openReflection.evidence || []).length === 0 ? (
+                                                            <p className="text-xs" style={{ color: tokens.inkSoft }}>No evidence attached.</p>
+                                                        ) : (
+                                                            <div className="flex flex-wrap gap-2">
+                                                                {openReflection.evidence.map((ev) => (
+                                                                    ev.type === "link" ? (
+                                                                        <a
+                                                                            key={ev.id}
+                                                                            href={ev.link}
+                                                                            target="_blank"
+                                                                            rel="noopener noreferrer"
+                                                                            className="text-xs px-2.5 py-1 rounded-full underline"
+                                                                            style={{ backgroundColor: "rgba(124,148,132,0.18)", color: tokens.sageDark }}
+                                                                        >
+                                                                            {ev.description || ev.link}
+                                                                        </a>
+                                                                    ) : (
+                                                                        <button
+                                                                            key={ev.id}
+                                                                            onClick={() => api.downloadEvidence(ev.id, ev.original_name).catch((error) => alert(error.message))}
+                                                                            className="text-xs px-2.5 py-1 rounded-full hover:brightness-95"
+                                                                            style={{ backgroundColor: "rgba(124,148,132,0.18)", color: tokens.sageDark }}
+                                                                        >
+                                                                            {ev.original_name || "Evidence file"}
+                                                                        </button>
+                                                                    )
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    )}
 
                                     {!isAssessor ? (
                                         // Sprint 5 (per chị Lan's feedback): a student account can
