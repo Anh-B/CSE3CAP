@@ -235,6 +235,26 @@ class ReflectionApiTest extends TestCase
         $response->assertStatus(200)->assertJsonCount(0, 'data.assessments');
     }
 
+    public function test_assessor_sees_the_text_student_name_and_evidence_of_a_reflection(): void
+    {
+        $student = User::factory()->create(['name' => 'Student Sam']);
+        $reflection = Reflection::factory()->create(['user_id' => $student->id, 'comment' => 'I led the demo.']);
+        \App\Models\Evidence::create([
+            'reflection_id' => $reflection->id,
+            'type' => 'link',
+            'link' => 'https://example.com/work',
+            'description' => 'Demo',
+        ]);
+        $this->actAsAssessor();
+
+        $this->getJson("/api/reflections/{$reflection->id}")
+            ->assertStatus(200)
+            ->assertJsonPath('data.comment', 'I led the demo.')
+            ->assertJsonPath('data.user.name', 'Student Sam')
+            ->assertJsonCount(1, 'data.evidence')
+            ->assertJsonPath('data.evidence.0.link', 'https://example.com/work');
+    }
+
     public function test_show_returns_404_for_a_nonexistent_reflection(): void
     {
         $response = $this->getJson('/api/reflections/99999');
