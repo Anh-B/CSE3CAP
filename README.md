@@ -58,7 +58,7 @@ The project brief specified AWS hosting. Because no Alumable environment was ava
 ### Assessor
 - A Pending Assessments tab lists reflections to review.
 - Open a student's reflection and save scores for the six competencies.
-- Assessors can also read every student's reflections and evidence.
+- Read the student's name, the full reflection text and the evidence.
 - Filter the list by Pending, Reviewed or All. The list refreshes after each score is saved.
 - Add optional written feedback (up to 1000 characters) with the scores.
 - Assessor accounts cannot be created from the Register tab (see [Accounts, roles and access control](#accounts-roles-and-access-control)).
@@ -85,9 +85,10 @@ Every sign-in starts with a blank radar chart. Choose **View / Edit** on a saved
 | --- | --- | --- |
 | 1 | Browser | Log in with an assessor account. Assessor accounts are created by the project team. |
 | 2 | Pending Assessments | The list opens on **Pending**. Use **Pending**, **Reviewed** and **All** to filter it. Choose **Open to score** on a reflection. |
-| 3 | **03 Assessor Feedback** | Set the scores and optional written feedback and then choose **Save Assessor Scores**. Unlock **Supervisor Edit Mode** if it is locked. |
-| 4 | Pending Assessments | The list refreshes automatically, and the reflection moves from **Pending** to **Reviewed**. Reviewed reflections can be reopened to change their scores. |
-| 5 | **04 Progress Overview** | Check the radar chart for the open reflection. |
+| 3 | **03 Assessor Feedback** | Read the **Reflection to assess** box: the student's name, the full reflection text and the evidence. Links open in a new tab and files download when chosen. |
+| 4 | **03 Assessor Feedback** | Set the scores and optional written feedback and then choose **Save Assessor Scores**. Unlock **Supervisor Edit Mode** if it is locked. |
+| 5 | Pending Assessments | The list refreshes automatically, and the reflection moves from **Pending** to **Reviewed**. Reviewed reflections can be reopened to change their scores. |
+| 6 | **04 Progress Overview** | Check the radar chart for the open reflection. |
 
 ## Architecture and design
 
@@ -149,6 +150,8 @@ erDiagram
         bigint id
         bigint reflection_id
         string type "file or link"
+        string link "web address, for a link"
+        string description
         string original_name
         string mime_type
         bigint size
@@ -173,6 +176,8 @@ sequenceDiagram
     API-->>S: 201 reflection saved
     A->>API: GET /api/reflections
     API-->>A: reflections with status pending or assessed
+    A->>API: GET /api/reflections/{id}
+    API-->>A: reflection text, student name, evidence
     A->>API: POST /api/assessments (reflection_id, scores, feedback)
     API-->>A: 201 assessment saved
     S->>API: GET /api/reflections/{id}
@@ -283,12 +288,14 @@ Settings live in the `.env` file locally and in the service's **Variables** on R
 | `FRONTEND_URL` | unset | unset | The exact web address of a frontend hosted on a **different** domain. Not needed while the page is served by the same application. |
 
 ## Accounts, roles and access control
-There are two roles, stored in users.role: student (the default) and assessor.
-- Registration always creates a student.
-- Sign-in returns a Sanctum bearer token. Every other route requires Authorization: Bearer <token>.
-- Assessor accounts are created or upgraded with php artisan assessor:create (see Create an assessor account).
+There are two roles, stored in `users.role`: `student` (the default) and `assessor`.
 
-### What each role can do:
+- Registration always creates a student.
+- Sign-in returns a Sanctum bearer token. Every other route requires `Authorization: Bearer <token>`.
+- Assessor accounts are created or upgraded with `php artisan assessor:create` (see [Create an assessor account](#create-an-assessor-account)).
+
+### What each role can do
+
 | Action | Student | Assessor |
 | --- | --- | --- |
 | Register | Yes | No |
@@ -305,18 +312,21 @@ There are two roles, stored in users.role: student (the default) and assessor.
 ### Create an assessor account
 Assessor accounts are created by the project team.
 1. Register a normal account using the **Register** tab.
-2. On Railway, open the service's **Console** tab:
-   ``` bash
-    php artisan assessor:create person@example.com --no-interaction
-   ```
-With `--no-interaction`, an existing student account is upgraded to assessor without a prompt, which is what the Railway Console needs because it cannot answer prompts.
+2. On Railway, open the service's **Console** tab and run:
+
+    ``` bash
+       php artisan assessor:create person@example.com --no-interaction
+    ```
+
+   With `--no-interaction`, an existing student account is upgraded to assessor without a prompt, which is what the Railway Console needs because it cannot answer prompts.
 3. Sign out and log in again. The assessor features are now available.
+
 To create a brand-new assessor from a normal terminal instead, run `php artisan assessor:create person@example.com "Full Name"`. The command asks for a password; the password never appears in the command history.
 
 The name entered when the account is registered is the name shown as "Assessed by" in the PDF journal and in the pending list, so register assessors with their real name.
 
 ## API overview
-Routes are defined in routes/api.php. Registration and log-in are public. Send Accept: application/json on every request. The full request and response examples are in docs/API.md.
+Routes are defined in `routes/api.php`. Registration and log-in are public. Send `Accept: application/json` on every request. Full request and response examples are in [`docs/API.md`](docs/API.md).
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
@@ -347,13 +357,13 @@ composer test
 ```
 (or `php artisan test`). The tests use an in-memory SQLite database, so they never touch real data.
 
-- **Result at the time of writing (13 October 2026):** 124 tests, 617 assertions, all passing.
+- **Result at the time of writing (13 October 2026):** 125 tests, 622 assertions, all passing.
 - **Continuous integration:** `.github/workflows/tests.yml` runs the suite on GitHub for PHP 8.2, 8.3 and 8.4 on every pull request and push, and once a day.
 
 | Test file | Tests | Covers |
 | --- | --- | --- |
 | `AuthApiTest.php` | 11 | Registration (student role only), sign-in, sign-out and token revocation, password rules |
-| `ReflectionApiTest.php` | 55 | Create, list (scoping, paging, status filter), read, update, delete, validation, title and category, access rules, PDF view and export |
+| `ReflectionApiTest.php` | 56 | Create, list (scoping, paging, status filter), read, update, delete, validation, title and category, access rules, PDF view and export, assessor reading a reflection with its evidence. |
 | `AssessmentApiTest.php` | 23 | Submit and read assessments, assessor-only rule, students reading only their own assessments, validation |
 | `EvidenceApiTest.php` | 25 | Upload, allowed file types, download, delete, access rules |
 | `CreateAssessorCommandTest.php` | 4 | Creating and upgrading assessor accounts |
@@ -368,6 +378,7 @@ composer test
 | Students and assessors sign in with separate roles | `AuthApiTest`, `CreateAssessorCommandTest` |
 | Students save, edit and delete their own reflections | `ReflectionApiTest` |
 | A student cannot read or change another student's reflections, evidence or assessments | `ReflectionApiTest`, `EvidenceApiTest`, `AssessmentApiTest` |
+| An assessor can read a reflection's text, student name and evidence before scoring | `ReflectionApiTest`, `EvidenceApiTest` |
 | Competency scores are validated from 1 to 5 | `ReflectionApiTest`, `AssessmentApiTest` |
 | Only assessors submit assessments | `AssessmentApiTest` |
 | Evidence upload, download and delete | `EvidenceApiTest` |
@@ -546,7 +557,8 @@ These are accurate for the current version. Items marked **fix recommended** sho
 - Bundle the frontend, split it into components and add browser-level tests.
 - Add pagination to the entry list, and a student-facing view of the history of assessments.
 - Update the dependencies reported by `composer audit` (see [Security notes](#security-notes)).
-
+- Add a progress-over-time view that combines scores across sprints.
+    
 ## Lessons learned
 
 - **Verify a merge by its contents.** A pull request was merged that contained only a stray patch file instead of the intended code. Checking the **Files changed** tab before merging, and testing the deployed result afterwards, would have caught this immediately.
