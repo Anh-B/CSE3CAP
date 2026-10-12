@@ -557,7 +557,7 @@ These are accurate for the current version. Items marked **fix recommended** sho
 - Bundle the frontend, split it into components and add browser-level tests.
 - Add pagination to the entry list, and a student-facing view of the history of assessments.
 - Update the dependencies reported by `composer audit` (see [Security notes](#security-notes)).
-- Add a progress-over-time view that combines scores across sprints.
+- Add a progress-over-time view that combines scores across sprints effectively.
     
 ## Lessons learned
 
