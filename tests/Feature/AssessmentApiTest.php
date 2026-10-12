@@ -286,4 +286,53 @@ class AssessmentApiTest extends TestCase
 
         $response->assertStatus(422)->assertJsonValidationErrors(['feedback']);
     }
+
+    // ---------- students can only read assessments of their own reflections ----------
+
+    public function test_a_student_only_sees_assessments_of_their_own_reflections(): void
+    {
+        $student = User::factory()->create();
+        $mine   = Reflection::factory()->create(['user_id' => $student->id]);
+        $other  = Reflection::factory()->create();
+        \App\Models\Assessment::factory()->create(['reflection_id' => $mine->id]);
+        \App\Models\Assessment::factory()->count(2)->create(['reflection_id' => $other->id]);
+
+        Sanctum::actingAs($student);
+
+        $this->getJson('/api/assessments')
+            ->assertStatus(200)
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('meta.total', 1);
+    }
+
+    public function test_a_student_can_show_an_assessment_of_their_own_reflection(): void
+    {
+        $student = User::factory()->create();
+        $mine = Reflection::factory()->create(['user_id' => $student->id]);
+        $assessment = \App\Models\Assessment::factory()->create(['reflection_id' => $mine->id]);
+
+        Sanctum::actingAs($student);
+
+        $this->getJson("/api/assessments/{$assessment->id}")
+            ->assertStatus(200)
+            ->assertJsonPath('data.id', $assessment->id);
+    }
+
+    public function test_a_student_cannot_show_an_assessment_of_someone_elses_reflection(): void
+    {
+        $assessment = \App\Models\Assessment::factory()->create();
+
+        Sanctum::actingAs(User::factory()->create());
+
+        $this->getJson("/api/assessments/{$assessment->id}")
+            ->assertStatus(403)
+            ->assertJson(['success' => false]);
+    }
+
+    public function test_an_assessor_can_still_show_any_assessment(): void
+    {
+        $assessment = \App\Models\Assessment::factory()->create();
+
+        $this->getJson("/api/assessments/{$assessment->id}")->assertStatus(200);
+    }
 }

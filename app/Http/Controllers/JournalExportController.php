@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Reflection;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Support\Facades\Log;
 
 class JournalExportController extends Controller
 {
@@ -21,9 +22,11 @@ class JournalExportController extends Controller
             return $pdf->download('reflection-journal.pdf');
 
         } catch (\Exception $e) {
+            // Keep the technical detail in the server log; don't send it to the browser.
+            Log::error('Journal export failed: ' . $e->getMessage());
+
             return response()->json([
-                'message' => 'Failed to export journal',
-                'error' => $e->getMessage()
+                'message' => 'Failed to export journal. Please try again later.'
             ], 500);
         }
     }
